@@ -312,4 +312,60 @@ export class ProductService {
       throw new Error(errorMessage);
     }
   };
+
+  // Create seller product request (for new product request system)
+  static createSellerProductRequest = async (productData: any): Promise<ApiResponse> => {
+    const url = `${env.baseUrl}/api/seller/product/create-request`;
+    try {
+      const res = await api.post(url, productData);
+      if (res.data?.status !== 200) {
+        throw new Error(res.data?.message || 'Failed to create product request');
+      }
+      toastHelper.showTost(res.data.message || 'Product request submitted successfully!', 'success');
+      return res.data;
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.message || 'Failed to create product request';
+      toastHelper.showTost(errorMessage, 'error');
+      throw new Error(errorMessage);
+    }
+  };
+
+  // Get next customer listing number
+  static getNextCustomerListingNumber = async (): Promise<any> => {
+    const url = `${env.baseUrl}/api/seller/product/get-next-customer-listing-number`;
+    try {
+      const res = await api.post(url, {});
+      return res.data;
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.message || 'Failed to get next customer listing number';
+      console.error(errorMessage);
+      throw new Error(errorMessage);
+    }
+  };
+
+  // Get next unique listing number (8-digit)
+  static getNextUniqueListingNumber = async (): Promise<any> => {
+    const url = `${env.baseUrl}/api/seller/product/get-next-unique-listing-number`;
+    try {
+      const res = await api.post(url, {});
+      return res.data;
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.message || 'Failed to get next unique listing number';
+      console.error(errorMessage);
+      throw new Error(errorMessage);
+    }
+  };
+
+  // Get next supplier listing number for current seller
+  static getNextSupplierListingNumber = async (isMultiVariant: boolean = false): Promise<any> => {
+    const url = `${env.baseUrl}/api/seller/product/get-next-supplier-listing-number`;
+    try {
+      const res = await api.post(url, { isMultiVariant });
+      return res.data;
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.message || 'Failed to get next supplier listing number';
+      console.error(errorMessage);
+      throw new Error(errorMessage);
+    }
+  };
 }

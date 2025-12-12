@@ -24,6 +24,7 @@ import AppLayout from "./layout/AppLayout";
 import { ScrollToTop } from "./components/common/ScrollToTop";
 import Home from "./pages/Dashboard/Home";
 import Products from "./pages/Products/Products";
+import ProductVariantForm from "./pages/Products/ProductVariantForm";
 import VerifyEmail from "./pages/AuthPages/VerifyEmail";
 import VerifyNotice from "./pages/AuthPages/VerifyNotice";
 import Activities from "./pages/Activities/Activities";
@@ -46,6 +47,7 @@ export default function App() {
             {/* <Route path="/calendar" element={<Calendar />} /> */}
             <Route path="/blank" element={<Blank />} />
             <Route path="/products" element={<Products />} />
+            <Route path="/products/create" element={<ProductVariantForm />} />
             <Route path="/activities" element={<Activities />} />
 
             {/* Forms */}

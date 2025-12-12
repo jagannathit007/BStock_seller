@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
 import { format } from "date-fns";
 import toastHelper from "../../utils/toastHelper";
 import UploadExcelModal from "./UploadExcelModal";
 import ProductModal from "./ProductsModal";
+import VariantSelectionModal from "./VariantSelectionModal";
 import { ProductService } from "../../services/products/products.services";
 
 interface Product {
@@ -18,7 +20,17 @@ interface Product {
   ram: string;
   storage: string;
   condition: string;
-  price: number;
+  price?: number; // Legacy field, may not exist
+  countryDeliverables?: Array<{
+    country: string;
+    currency: string;
+    usd?: number;
+    hkd?: number;
+    aed?: number;
+    local?: number;
+    basePrice?: number;
+    calculatedPrice?: number;
+  }>;
   stock: number;
   country: string;
   moq: number;
@@ -33,6 +45,7 @@ interface Product {
 }
 
 const ProductsTable: React.FC = () => {
+  const navigate = useNavigate();
   const [productsData, setProductsData] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -44,6 +57,7 @@ const ProductsTable: React.FC = () => {
   const [totalDocs, setTotalDocs] = useState<number>(0);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [showVariantSelectionModal, setShowVariantSelectionModal] = useState<boolean>(false);
   const itemsPerPage = 10;
 
   // Fetch products on component mount and when page/search changes
@@ -213,12 +227,27 @@ const ProductsTable: React.FC = () => {
     return "https://via.placeholder.com/60x60?text=Product";
   };
 
-  const formatPrice = (price: number | string): string => {
+  const formatPrice = (price: number | string | undefined | null): string => {
+    if (price === undefined || price === null) {
+      return "0.00";
+    }
     if (typeof price === "string") {
       const num = parseFloat(price);
       return isNaN(num) ? "0.00" : num.toFixed(2);
     }
     return price.toFixed(2);
+  };
+
+  // Helper function to get price from countryDeliverables or legacy price field
+  const getProductPrice = (product: Product): number => {
+    // Try to get price from countryDeliverables first (new structure)
+    if (Array.isArray(product.countryDeliverables) && product.countryDeliverables.length > 0) {
+      // Get the first country deliverable's USD price, or basePrice, or calculatedPrice
+      const firstDeliverable = product.countryDeliverables[0];
+      return firstDeliverable.usd || firstDeliverable.basePrice || firstDeliverable.calculatedPrice || 0;
+    }
+    // Fallback to legacy price field
+    return product.price || 0;
   };
 
   const formatExpiryTime = (expiryTime: string): string => {
@@ -305,13 +334,10 @@ const ProductsTable: React.FC = () => {
             </button>
             <button
               className="inline-flex items-center gap-2 rounded-lg bg-[#0071E0] text-white px-4 py-2 text-sm font-medium hover:bg-blue-600 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
-              onClick={() => {
-                setEditProduct(null);
-                setIsModalOpen(true);
-              }}
+              onClick={() => setShowVariantSelectionModal(true)}
             >
               <i className="fas fa-plus text-xs"></i>
-              Add Product
+              Add Product Request
             </button>
           </div>
         </div>
@@ -417,7 +443,7 @@ const ProductsTable: React.FC = () => {
                         {item.storage}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                        ${formatPrice(item.price)}
+                        ${formatPrice(getProductPrice(item))}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                         {item.country}
@@ -683,7 +709,7 @@ const ProductsTable: React.FC = () => {
                       Price
                     </label>
                     <p className="text-lg text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800 p-3 rounded-md font-semibold">
-                      ${formatPrice(selectedProduct.price)}
+                      ${formatPrice(getProductPrice(selectedProduct))}
                     </p>
                   </div>
 
@@ -738,6 +764,12 @@ const ProductsTable: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Variant Selection Modal */}
+      <VariantSelectionModal
+        isOpen={showVariantSelectionModal}
+        onClose={() => setShowVariantSelectionModal(false)}
+      />
     </div>
   );
 };

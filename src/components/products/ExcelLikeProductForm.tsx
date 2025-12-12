@@ -1,0 +1,2408 @@
+import React, { useState, useEffect, useRef } from 'react';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+import Select from 'react-select';
+import { VariantOption } from './CascadingVariantSelector';
+import { GradeService } from '../../services/grade/grade.services';
+import { ProductService } from '../../services/products/products.services';
+import { ConstantsService, Constants } from '../../services/constants/constants.services';
+import { SkuFamilyService } from '../../services/skuFamily/skuFamily.services';
+import { SellerProductPermissionService, SellerProductFieldPermission } from '../../services/sellerProductPermission/sellerProductPermission.services';
+import { STORAGE_KEYS, StorageService } from '../../constants/storage';
+import toastHelper from '../../utils/toastHelper';
+
+export interface ProductRowData {
+  // Product Detail Group
+  subModelName: string;
+  storage: string;
+  colour: string;
+  country: string;
+  sim: string;
+  version: string;
+  grade: string;
+  status: string;
+  condition: string;
+  lockUnlock: string;
+  warranty: string;
+  batteryHealth: string;
+  
+  // Pricing / Delivery / Payment Method Group
+  packing: string;
+  currentLocation: string; // Store code: "HK" or "D"
+  hkUsd: number | string;
+  hkXe: number | string;
+  hkHkd: number | string;
+  dubaiUsd: number | string;
+  dubaiXe: number | string;
+  dubaiAed: number | string;
+  deliveryLocation: string[]; // Array of codes: ["HK", "D"]
+  customMessage: string;
+  totalQty: number | string;
+  moqPerVariant: number | string;
+  weight: number | string;
+  // Payment Term - single field (from constants)
+  paymentTerm: string;
+  // Payment Method - single field (from constants, stored as comma-separated string for multiple selection)
+  paymentMethod: string;
+  
+  // Other Information Group
+  negotiableFixed: string;
+  tags: string; // Comma-separated string of tag codes
+  flashDeal: string;
+  shippingTime: string;
+  deliveryTime: string;
+  vendor: string;
+  vendorListingNo: string;
+  carrier: string;
+  carrierListingNo: string;
+  uniqueListingNo: string;
+  adminCustomMessage: string;
+  startTime: string;
+  endTime: string;
+  remark: string;
+  
+  // Additional fields
+  supplierId: string; // Seller ID (disabled, auto-filled from current user)
+  supplierListingNumber: string;
+  customerListingNumber: string;
+  skuFamilyId: string;
+  ram?: string;
+  sequence?: number;
+  images?: string[];
+}
+
+interface ExcelLikeProductFormProps {
+  variantType: 'single' | 'multi';
+  variants?: VariantOption[];
+  onSave: (rows: ProductRowData[], totalMoq?: number | string) => void;
+  onCancel: () => void;
+}
+
+const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
+  variantType,
+  variants = [],
+  onSave,
+  onCancel,
+}) => {
+  const [rows, setRows] = useState<ProductRowData[]>([]);
+  const [grades, setGrades] = useState<any[]>([]);
+  const [skuFamilies, setSkuFamilies] = useState<any[]>([]);
+  const [constants, setConstants] = useState<Constants | null>(null);
+  const [permissions, setPermissions] = useState<SellerProductFieldPermission[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [totalMoq, setTotalMoq] = useState<number | string>(''); 
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [focusedCell, setFocusedCell] = useState<{ row: number; col: string } | null>(null);
+  const cellRefs = useRef<Record<string, HTMLInputElement | HTMLSelectElement | null>>({});
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  // State for row-specific SKU Family search
+  const [rowSkuFamilySearch, setRowSkuFamilySearch] = useState<{ rowIndex: number; query: string; showResults: boolean } | null>(null);
+  const [rowSkuFamilySearchResults, setRowSkuFamilySearchResults] = useState<any[]>([]);
+  const [shippingTimeMode, setShippingTimeMode] = useState<Record<number, 'today' | 'tomorrow' | 'calendar' | ''>>({});
+  const totalMoqCellRef = useRef<HTMLDivElement | null>(null);
+  const rowsContainerRef = useRef<HTMLDivElement | null>(null);
+  const totalMoqPlaceholderRef = useRef<HTMLDivElement | null>(null);
+  const [totalMoqHeight, setTotalMoqHeight] = useState<number>(0);
+  const [totalMoqLeft, setTotalMoqLeft] = useState<number>(0);
+  const [currentCustomerListingNumber, setCurrentCustomerListingNumber] = useState<number | null>(null);
+  const [currentUniqueListingNumber, setCurrentUniqueListingNumber] = useState<number | null>(null);
+  const [supplierListingNumberInfo, setSupplierListingNumberInfo] = useState<{ listingNumber: number; supplierCode: string } | null>(null);
+  
+  // Get current seller ID from storage
+  const getCurrentSellerId = (): string => {
+    const user = StorageService.getItem<any>(STORAGE_KEYS.USER);
+    return user?._id || user?.id || '';
+  };
+
+  // Get current seller code from storage
+  const getCurrentSellerCode = (): string => {
+    const user = StorageService.getItem<any>(STORAGE_KEYS.USER);
+    return user?.code || '';
+  };
+
+  // Removed modal states - sellers don't set margins/costs
+  const [pendingRows, setPendingRows] = useState<ProductRowData[]>([]);
+  const [pendingTotalMoq, setPendingTotalMoq] = useState<number | string | undefined>(undefined);
+
+  // LocalStorage key for saving form data
+  const STORAGE_KEY = 'variant-product-form-data';
+
+  // Load data from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedData = localStorage.getItem(STORAGE_KEY);
+      if (savedData) {
+        const parsed = JSON.parse(savedData);
+        // Only restore if variantType matches
+        if (parsed.variantType === variantType && parsed.rows && parsed.rows.length > 0) {
+          setRows(parsed.rows);
+          // Restore totalMoq if it exists and variantType is multi
+          if (variantType === 'multi' && parsed.totalMoq !== undefined) {
+            setTotalMoq(parsed.totalMoq);
+          }
+          // Show notification that data was restored
+          // toastHelper.showTost(`Restored ${parsed.rows.length} row(s) from saved data`, 'info');
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error loading from localStorage:', error);
+    }
+    
+    // Initialize rows based on variant type if no saved data
+    if (variantType === 'multi') {
+      if (variants.length > 0) {
+        const newRows: ProductRowData[] = variants.map((variant, index) => createEmptyRow(index, variant));
+        setRows(newRows);
+      } else {
+        // If no variants provided, create one empty row
+        setRows([createEmptyRow(0)]);
+      }
+    } else if (variantType === 'single') {
+      setRows([createEmptyRow(0)]);
+    }
+  }, [variantType, variants]);
+
+  // Sync shipping time mode with values
+  useEffect(() => {
+    const newModes: Record<number, 'today' | 'tomorrow' | 'calendar' | ''> = {};
+    let hasChanges = false;
+    
+    rows.forEach((row, index) => {
+      const shippingTimeValue = row.shippingTime;
+      if (!shippingTimeValue) {
+        if (shippingTimeMode[index]) {
+          newModes[index] = '';
+          hasChanges = true;
+        }
+        return;
+      }
+      
+      try {
+        const formatDate = (date: Date): string => {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        };
+        
+        const getToday = (): Date => {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          return today;
+        };
+        
+        const getTomorrow = (): Date => {
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          tomorrow.setHours(0, 0, 0, 0);
+          return tomorrow;
+        };
+        
+        const dateValue = new Date(shippingTimeValue);
+        dateValue.setHours(0, 0, 0, 0);
+        
+        const todayStr = formatDate(getToday());
+        const tomorrowStr = formatDate(getTomorrow());
+        const valueStr = formatDate(dateValue);
+        
+        let detectedMode: 'today' | 'tomorrow' | 'calendar' | '' = '';
+        if (valueStr === todayStr) {
+          detectedMode = 'today';
+        } else if (valueStr === tomorrowStr) {
+          detectedMode = 'tomorrow';
+        } else {
+          detectedMode = 'calendar';
+        }
+        
+        if (shippingTimeMode[index] !== detectedMode) {
+          newModes[index] = detectedMode;
+          hasChanges = true;
+        }
+      } catch (e) {
+        // Invalid date, clear mode
+        if (shippingTimeMode[index]) {
+          newModes[index] = '';
+          hasChanges = true;
+        }
+      }
+    });
+    
+    if (hasChanges) {
+      setShippingTimeMode((prev) => {
+        const updated = { ...prev };
+        Object.keys(newModes).forEach((key) => {
+          const idx = Number(key);
+          const mode = newModes[idx];
+          if (mode === '' || mode === 'today' || mode === 'tomorrow' || mode === 'calendar') {
+            updated[idx] = mode;
+          }
+        });
+        return updated;
+      });
+    }
+  }, [rows.map(r => r.shippingTime).join(',')]);
+
+  useEffect(() => {
+    if (variantType === 'multi' && rows.length > 0) {
+      const updatePosition = () => {
+        if (rowsContainerRef.current) {
+          // Get the actual height of the rows container
+          const containerHeight = rowsContainerRef.current.scrollHeight;
+          setTotalMoqHeight(containerHeight);
+        } else {
+          // Fallback: calculate approximate height (40px per row + borders)
+          const approximateHeight = rows.length * 40;
+          setTotalMoqHeight(approximateHeight);
+        }
+        
+        // Measure the actual left position from the placeholder
+        if (totalMoqPlaceholderRef.current && rowsContainerRef.current) {
+          const placeholderRect = totalMoqPlaceholderRef.current.getBoundingClientRect();
+          const containerRect = rowsContainerRef.current.getBoundingClientRect();
+          const leftPosition = placeholderRect.left - containerRect.left;
+          setTotalMoqLeft(leftPosition);
+        }
+      };
+      
+      // Use ResizeObserver for accurate tracking
+      if (rowsContainerRef.current) {
+        const resizeObserver = new ResizeObserver(() => {
+          updatePosition();
+        });
+        resizeObserver.observe(rowsContainerRef.current);
+        
+        // Initial update
+        updatePosition();
+        
+        // Also update after a short delay to ensure DOM is ready
+        const timeoutId = setTimeout(updatePosition, 100);
+        const timeoutId2 = setTimeout(updatePosition, 300);
+        
+        return () => {
+          resizeObserver.disconnect();
+          clearTimeout(timeoutId);
+          clearTimeout(timeoutId2);
+        };
+      } else {
+        // Fallback calculation
+        const approximateHeight = rows.length * 40;
+        setTotalMoqHeight(approximateHeight);
+      }
+    } else {
+      setTotalMoqHeight(0);
+      setTotalMoqLeft(0);
+    }
+  }, [rows.length, variantType, rows]);
+
+  // Save data to localStorage whenever rows or totalMoq change
+  useEffect(() => {
+    if (rows.length > 0) {
+      try {
+        const dataToSave = {
+          variantType,
+          rows,
+          totalMoq: variantType === 'multi' ? totalMoq : undefined,
+          timestamp: new Date().toISOString(),
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+      } catch (error) {
+        console.error('Error saving to localStorage:', error);
+      }
+    }
+  }, [rows, variantType, totalMoq]);
+
+  const createEmptyRow = (index: number, variant?: VariantOption): ProductRowData => ({
+    subModelName: variant?.subModelName || '',
+    storage: variant?.storage || '',
+    colour: variant?.color || '',
+    country: '',
+    sim: '',
+    version: '',
+    grade: '',
+    status: '', // Will be set from constants
+    condition: '',
+    lockUnlock: '',
+    warranty: '',
+    batteryHealth: '',
+    packing: '',
+    currentLocation: '',
+    hkUsd: '',
+    hkXe: '',
+    hkHkd: '',
+    dubaiUsd: '',
+    dubaiXe: '',
+    dubaiAed: '',
+    deliveryLocation: [],
+    customMessage: '',
+    totalQty: '',
+    moqPerVariant: '',
+    weight: '',
+    paymentTerm: '',
+    paymentMethod: '',
+    negotiableFixed: '0',
+    tags: '',
+    flashDeal: '',
+    shippingTime: '',
+    deliveryTime: '',
+    vendor: '',
+    vendorListingNo: '',
+    carrier: '',
+    carrierListingNo: '',
+    uniqueListingNo: '',
+    adminCustomMessage: '',
+    startTime: '',
+    endTime: '',
+    remark: '',
+    supplierId: getCurrentSellerId(), // Auto-fill with current seller ID
+    supplierListingNumber: '',
+    customerListingNumber: '',
+    skuFamilyId: variant?.skuFamilyId || '',
+    ram: variant?.ram,
+    sequence: index + 1,
+  });
+
+  // Load permissions and fetch dropdown data
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        
+        // Load seller permissions
+        try {
+          const sellerPermissions = await SellerProductPermissionService.getCurrentSellerPermissions();
+          setPermissions(sellerPermissions);
+          // If no permissions returned, use empty array (strict mode - only show first 6 fields)
+          if (!sellerPermissions || sellerPermissions.length === 0) {
+            console.warn('No seller permissions found. Only first 6 system fields will be visible.');
+            setPermissions([]);
+          }
+        } catch (error: any) {
+          console.warn('Error loading seller permissions. Only first 6 system fields will be visible.');
+          // Don't set all fields to true - use empty array for strict mode
+          setPermissions([]);
+        }
+        
+        const gradeResponse = await GradeService.getGradeList(1, 1000);
+        setGrades(gradeResponse.data.docs || []);
+        const skuFamiliesList = await SkuFamilyService.getSkuFamilyListByName();
+        setSkuFamilies(skuFamiliesList || []);
+        const constantsData = await ConstantsService.getConstants();
+        setConstants(constantsData);
+        
+        // Fetch next customer listing number
+        try {
+          const customerListingData = await ProductService.getNextCustomerListingNumber();
+          setCurrentCustomerListingNumber(customerListingData.data?.listingNumber || 1);
+        } catch (error) {
+          console.error('Error fetching customer listing number:', error);
+          // Default to 1 if fetch fails
+          setCurrentCustomerListingNumber(1);
+        }
+        
+        // Fetch next unique listing number (8-digit)
+        try {
+          const uniqueListingData = await ProductService.getNextUniqueListingNumber();
+          setCurrentUniqueListingNumber(parseInt(uniqueListingData.data?.uniqueListingNumber || '10000000', 10));
+        } catch (error) {
+          console.error('Error fetching unique listing number:', error);
+          // Default to 10000000 if fetch fails
+          setCurrentUniqueListingNumber(10000000);
+        }
+
+        // Fetch next supplier listing number for current seller
+        try {
+          const supplierListingData = await ProductService.getNextSupplierListingNumber(variantType === 'multi');
+          if (supplierListingData.data) {
+            setSupplierListingNumberInfo({
+              listingNumber: supplierListingData.data.listingNumber || 1,
+              supplierCode: supplierListingData.data.supplierCode || getCurrentSellerCode()
+            });
+          } else {
+            // Fallback: use seller code from storage
+            const sellerCode = getCurrentSellerCode();
+            if (sellerCode) {
+              setSupplierListingNumberInfo({
+                listingNumber: 1,
+                supplierCode: sellerCode
+              });
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching supplier listing number:', error);
+          // Use seller code from storage as fallback
+          const sellerCode = getCurrentSellerCode();
+          if (sellerCode) {
+            setSupplierListingNumberInfo({
+              listingNumber: 1,
+              supplierCode: sellerCode
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        toastHelper.showTost('Failed to load form data', 'error');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  // Helper function to check if field has permission
+  const hasPermission = (fieldName: string): boolean => {
+    // First 6 system fields that should always be visible (without permission check)
+    // These are critical fields needed for product creation
+    const alwaysVisibleFields = [
+      'supplierId',           // 1. SUPPLIER ID
+      'supplierListingNumber', // 2. SUPPLIER LISTING NO
+      'customerListingNumber', // 3. CUSTOMER LISTING NO
+      'skuFamilyId',          // 4. SKU Family
+      'subModelName',         // 5. SubModelName
+      'storage'               // 6. Storage
+    ];
+    
+    // Always show first 6 fields without permission check
+    if (alwaysVisibleFields.includes(fieldName)) {
+      return true;
+    }
+    
+    // For all other fields, check permissions
+    // If no permissions loaded, don't show the field (strict mode)
+    if (permissions.length === 0) {
+      return false;
+    }
+    
+    const permission = permissions.find(p => p.fieldName === fieldName);
+    // Only show if permission explicitly granted
+    return permission?.hasPermission ?? false;
+  };
+
+  // Flatten SKU Families with subSkuFamilies for search
+  const getFlattenedSkuFamilyOptions = () => {
+    const options: any[] = [];
+    skuFamilies.forEach((skuFamily) => {
+      // Add SKU Family itself (if it has no subSkuFamilies or we want to show it)
+      if (!skuFamily.subSkuFamilies || skuFamily.subSkuFamilies.length === 0) {
+        options.push({
+          skuFamilyId: skuFamily._id,
+          skuFamilyName: skuFamily.name,
+          subModelName: skuFamily.name,
+          storage: '',
+          storageId: null,
+          colour: '',
+          colorId: null,
+          ram: '',
+          ramId: null,
+          displayText: `${skuFamily.name}${skuFamily.brand ? ` - ${skuFamily.brand.title}` : ''}`,
+        });
+      } else {
+        // Add each subSkuFamily as a separate option
+        skuFamily.subSkuFamilies.forEach((subSku: any) => {
+          options.push({
+            skuFamilyId: skuFamily._id,
+            skuFamilyName: skuFamily.name,
+            subModelName: subSku.subName || skuFamily.name,
+            storage: subSku.storageId?.title || '',
+            storageId: subSku.storageId?._id || null,
+            colour: subSku.colorId?.title || '',
+            colorId: subSku.colorId?._id || null,
+            ram: subSku.ramId?.title || '',
+            ramId: subSku.ramId?._id || null,
+            displayText: `${skuFamily.name}${subSku.subName ? ` - ${subSku.subName}` : ''}${subSku.storageId?.title ? ` - ${subSku.storageId.title}` : ''}${subSku.colorId?.title ? ` - ${subSku.colorId.title}` : ''}${subSku.ramId?.title ? ` - ${subSku.ramId.title}` : ''}`,
+          });
+        });
+      }
+    });
+    return options;
+  };
+
+  // Search functionality for top search - removed as it's not used (commented out in UI)
+
+  // Search functionality for row-specific SKU Family search
+  useEffect(() => {
+    if (!rowSkuFamilySearch) {
+      setRowSkuFamilySearchResults([]);
+      return;
+    }
+
+    const allOptions = getFlattenedSkuFamilyOptions();
+    
+    // If query is empty, show all options; otherwise filter
+    if (!rowSkuFamilySearch.query.trim()) {
+      setRowSkuFamilySearchResults(allOptions);
+      setRowSkuFamilySearch(prev => prev ? { ...prev, showResults: allOptions.length > 0 } : null);
+    } else {
+      const query = rowSkuFamilySearch.query.toLowerCase().trim();
+      const filtered = allOptions.filter((option) => {
+        const searchText = `${option.skuFamilyName} ${option.subModelName} ${option.storage} ${option.colour} ${option.ram}`.toLowerCase();
+        return searchText.includes(query);
+      });
+
+      setRowSkuFamilySearchResults(filtered);
+      setRowSkuFamilySearch(prev => prev ? { ...prev, showResults: filtered.length > 0 } : null);
+    }
+  }, [rowSkuFamilySearch?.query, skuFamilies]);
+
+  // Handle selection from search results (top search)
+
+  // Handle selection from row-specific SKU Family search
+  const handleRowSkuFamilySearchSelect = (option: any, rowIndex: number) => {
+    // Update SKU Family ID
+    updateRow(rowIndex, 'skuFamilyId', option.skuFamilyId);
+    
+    // Auto-fill related fields from selected SKU Family (matching admin panel behavior)
+    updateRow(rowIndex, 'subModelName', option.subModelName || '');
+    updateRow(rowIndex, 'storage', option.storage || '');
+    updateRow(rowIndex, 'colour', option.colour || '');
+    if (option.ram) {
+      updateRow(rowIndex, 'ram', option.ram);
+    }
+    
+    // Close search dropdown
+    setRowSkuFamilySearch(null);
+    setRowSkuFamilySearchResults([]);
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+N or Cmd+N to add row
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+        e.preventDefault();
+        addRow();
+      }
+      // Delete key to remove row if focused
+      if (e.key === 'Delete' && focusedCell) {
+        const cell = cellRefs.current[`${focusedCell.row}-${focusedCell.col}`];
+        if (cell && 'value' in cell) {
+          updateRow(focusedCell.row, focusedCell.col as keyof ProductRowData, '');
+        }
+      }
+      // Escape key to close SKU Family search
+      if (e.key === 'Escape' && rowSkuFamilySearch) {
+        setRowSkuFamilySearch(null);
+        setRowSkuFamilySearchResults([]);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [focusedCell, rows.length, rowSkuFamilySearch]);
+
+  // Removed supplier dropdown click outside handler
+
+  // Auto-calculate delivery location and currency conversions
+  useEffect(() => {
+    setRows(prevRows => prevRows.map(row => {
+      const updatedRow = { ...row };
+      
+      // Auto-calculate delivery location based on pricing
+      const locations: string[] = [];
+      // If HK pricing exists, add HK to delivery locations
+      if (row.hkUsd || row.hkHkd) {
+        locations.push('HK');
+      }
+      // If Dubai pricing exists, add D to delivery locations
+      if (row.dubaiUsd || row.dubaiAed) {
+        locations.push('D');
+      }
+      updatedRow.deliveryLocation = locations;
+      
+      return updatedRow;
+    }));
+  }, [rows.map(r => `${r.currentLocation}-${r.hkUsd}-${r.hkHkd}-${r.dubaiUsd}-${r.dubaiAed}`).join(',')]);
+
+  // Auto-generate customer listing numbers when rows change
+  useEffect(() => {
+    if (currentCustomerListingNumber !== null && rows.length > 0) {
+      setRows(prevRows => prevRows.map((row, index) => {
+        const updatedRow = { ...row };
+        const productNumber = index + 1;
+        const customerListingNo = `L${currentCustomerListingNumber}-${productNumber}`;
+        if (!updatedRow.customerListingNumber || updatedRow.customerListingNumber !== customerListingNo) {
+          updatedRow.customerListingNumber = customerListingNo;
+        }
+        return updatedRow;
+      }));
+    }
+  }, [rows.length, currentCustomerListingNumber]);
+
+  // Auto-generate unique listing numbers when rows change
+  useEffect(() => {
+    if (currentUniqueListingNumber !== null && rows.length > 0) {
+      setRows(prevRows => prevRows.map((row, index) => {
+        const updatedRow = { ...row };
+        const uniqueListingNo = String(currentUniqueListingNumber + index).padStart(8, '0');
+        if (!updatedRow.uniqueListingNo || updatedRow.uniqueListingNo !== uniqueListingNo) {
+          updatedRow.uniqueListingNo = uniqueListingNo;
+        }
+        return updatedRow;
+      }));
+    }
+  }, [rows.length, currentUniqueListingNumber]);
+
+  // Auto-generate supplier listing numbers when rows change
+  useEffect(() => {
+    if (!supplierListingNumberInfo || rows.length === 0) return;
+    
+    setRows(prevRows => {
+      let hasChanges = false;
+      const updatedRows = prevRows.map((row, index) => {
+        const updatedRow = { ...row };
+        
+        // Count how many rows come before this row (for product number)
+        const productNum = index + 1;
+        const listingPrefix = variantType === 'multi' 
+          ? `L${supplierListingNumberInfo.listingNumber}M1` 
+          : `L${supplierListingNumberInfo.listingNumber}`;
+        const expectedListingNo = `${supplierListingNumberInfo.supplierCode}-${listingPrefix}-${productNum}`;
+        
+        if (updatedRow.supplierListingNumber !== expectedListingNo) {
+          hasChanges = true;
+          updatedRow.supplierListingNumber = expectedListingNo;
+        }
+        
+        return updatedRow;
+      });
+      
+      return hasChanges ? updatedRows : prevRows;
+    });
+  }, [rows.length, supplierListingNumberInfo, variantType]);
+
+  // Removed auto-generation of customer/unique/supplier listing numbers - sellers don't need these
+
+  const updateRow = (index: number, field: keyof ProductRowData, value: any) => {
+    setRows(prevRows => {
+      const newRows = [...prevRows];
+      newRows[index] = { ...newRows[index], [field]: value };
+      
+      // Removed supplier listing number auto-generation - sellers don't select suppliers
+      
+      // Auto-calculate currency conversions for HK
+      if (field === 'hkUsd' || field === 'hkXe' || field === 'hkHkd') {
+        const usd = parseFloat(String(newRows[index].hkUsd)) || 0;
+        const xe = parseFloat(String(newRows[index].hkXe)) || 0;
+        const hkd = parseFloat(String(newRows[index].hkHkd)) || 0;
+        
+        // Count how many values are present (greater than 0)
+        const valuesCount = [usd, xe, hkd].filter(v => v > 0).length;
+        
+        // Only calculate if at least 2 values exist
+        if (valuesCount >= 2) {
+          // Calculate the missing value when any two values exist
+          // Priority: don't overwrite the field being edited
+          if (field !== 'hkHkd' && usd > 0 && xe > 0) {
+            // If USD and XE exist, calculate HKD (multiply USD * XE)
+            newRows[index].hkHkd = (usd * xe).toFixed(2);
+          } else if (field !== 'hkUsd' && hkd > 0 && xe > 0) {
+            // If HKD and XE exist, calculate USD (divide HKD / XE)
+            newRows[index].hkUsd = (hkd / xe).toFixed(2);
+          } else if (field !== 'hkXe' && usd > 0 && hkd > 0) {
+            // If USD and HKD exist, calculate XE (divide HKD / USD)
+            newRows[index].hkXe = (hkd / usd).toFixed(4);
+          }
+        }
+      }
+      
+      // Auto-calculate currency conversions for Dubai
+      if (field === 'dubaiUsd' || field === 'dubaiXe' || field === 'dubaiAed') {
+        const usd = parseFloat(String(newRows[index].dubaiUsd)) || 0;
+        const xe = parseFloat(String(newRows[index].dubaiXe)) || 0;
+        const aed = parseFloat(String(newRows[index].dubaiAed)) || 0;
+        
+        // Count how many values are present (greater than 0)
+        const valuesCount = [usd, xe, aed].filter(v => v > 0).length;
+        
+        // Only calculate if at least 2 values exist
+        if (valuesCount >= 2) {
+          // Calculate the missing value when any two values exist
+          // Priority: don't overwrite the field being edited
+          if (field !== 'dubaiAed' && usd > 0 && xe > 0) {
+            // If USD and XE exist, calculate AED (multiply USD * XE)
+            newRows[index].dubaiAed = (usd * xe).toFixed(2);
+          } else if (field !== 'dubaiUsd' && aed > 0 && xe > 0) {
+            // If AED and XE exist, calculate USD (divide AED / XE)
+            newRows[index].dubaiUsd = (aed / xe).toFixed(2);
+          } else if (field !== 'dubaiXe' && usd > 0 && aed > 0) {
+            // If USD and AED exist, calculate XE (divide AED / USD)
+            newRows[index].dubaiXe = (aed / usd).toFixed(4);
+          }
+        }
+      }
+      
+      return newRows;
+    });
+  };
+
+  const addRow = () => {
+    setRows(prevRows => [...prevRows, createEmptyRow(prevRows.length)]);
+  };
+
+  const removeRow = (index: number) => {
+    if (rows.length > 1) {
+      setRows(prevRows => prevRows.filter((_, i) => i !== index));
+    }
+  };
+
+  const duplicateRow = (index: number) => {
+    setRows(prevRows => {
+      const newRow = { ...prevRows[index], sequence: prevRows.length + 1 };
+      // Clear unique fields
+      newRow.uniqueListingNo = '';
+      newRow.supplierId = getCurrentSellerId();
+      newRow.supplierListingNumber = '';
+      newRow.customerListingNumber = '';
+      newRow.tags = '';
+      return [...prevRows, newRow];
+    });
+  };
+
+  const fillDown = (rowIndex: number, columnKey: string) => {
+    if (rowIndex === rows.length - 1) return;
+    const value = rows[rowIndex][columnKey as keyof ProductRowData];
+    updateRow(rowIndex + 1, columnKey as keyof ProductRowData, value);
+  };
+
+  const fillAllBelow = (rowIndex: number, columnKey: string) => {
+    const value = rows[rowIndex][columnKey as keyof ProductRowData];
+    setRows(prevRows => prevRows.map((row, idx) => 
+      idx > rowIndex ? { ...row, [columnKey]: value } : row
+    ));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Set current time for start time if not entered
+    const currentTime = new Date().toISOString();
+    const updatedRows = rows.map(row => ({
+      ...row,
+      startTime: row.startTime || currentTime
+    }));
+    setRows(updatedRows);
+    
+    // Validate required fields based on permissions
+    const errors: string[] = [];
+      updatedRows.forEach((row, index) => {
+        if (hasPermission('supplierId') && !row.supplierId) errors.push(`Row ${index + 1}: SUPPLIER ID is required`);
+      if (hasPermission('skuFamilyId') && !row.skuFamilyId) errors.push(`Row ${index + 1}: SKU Family is required`);
+        if (hasPermission('subModelName') && !row.subModelName) errors.push(`Row ${index + 1}: SubModelName is required`);
+        if (hasPermission('storage') && !row.storage) errors.push(`Row ${index + 1}: Storage is required`);
+        if (hasPermission('colour') && !row.colour) errors.push(`Row ${index + 1}: Colour is required`);
+        if (hasPermission('country') && !row.country) errors.push(`Row ${index + 1}: Country is required`);
+        if (hasPermission('sim') && !row.sim) errors.push(`Row ${index + 1}: SIM is required`);
+        if (hasPermission('grade') && !row.grade) errors.push(`Row ${index + 1}: GRADE is required`);
+        if (hasPermission('status') && !row.status) errors.push(`Row ${index + 1}: STATUS is required`);
+        if (hasPermission('lockUnlock') && !row.lockUnlock) errors.push(`Row ${index + 1}: LOCK/UNLOCK is required`);
+        if (hasPermission('packing') && !row.packing) errors.push(`Row ${index + 1}: PACKING is required`);
+        if (hasPermission('currentLocation') && !row.currentLocation) errors.push(`Row ${index + 1}: CURRENT LOCATION is required`);
+        if (hasPermission('totalQty') && !row.totalQty) errors.push(`Row ${index + 1}: TOTAL QTY is required`);
+        if (hasPermission('moqPerVariant') && !row.moqPerVariant) errors.push(`Row ${index + 1}: MOQ/VARIANT is required`);
+        if (hasPermission('supplierListingNumber') && !row.supplierListingNumber) errors.push(`Row ${index + 1}: SUPPLIER LISTING NO is required`);
+        if (hasPermission('customerListingNumber') && !row.customerListingNumber) errors.push(`Row ${index + 1}: CUSTOMER LISTING NO is required`);
+        if (hasPermission('paymentTerm') && !row.paymentTerm) errors.push(`Row ${index + 1}: PAYMENT TERM is required`);
+        if (hasPermission('paymentMethod') && (!row.paymentMethod || row.paymentMethod.trim() === '')) {
+          errors.push(`Row ${index + 1}: PAYMENT METHOD is required`);
+        }
+        if (hasPermission('endTime') && !row.endTime) errors.push(`Row ${index + 1}: END TIME is required`);
+      });
+
+    if (errors.length > 0) {
+      // Use a better error display
+      const errorMessage = `Please fix the following ${errors.length} error(s):\n\n${errors.slice(0, 10).join('\n')}${errors.length > 10 ? `\n\n... and ${errors.length - 10} more errors` : ''}`;
+      if (window.confirm(errorMessage + '\n\nDo you want to continue anyway?')) {
+        // User wants to continue despite errors
+      } else {
+        return;
+      }
+    }
+
+    const rowsWithListingNos = updatedRows;
+    
+    if (variantType === 'multi' && !totalMoq) {
+      toastHelper.showTost('MOQ PER CART is required for multi-variant products', 'error');
+      return;
+    }
+    
+    // For sellers, directly create product requests (no margin/cost modals)
+    await handleDirectSubmit(rowsWithListingNos, variantType === 'multi' ? totalMoq : undefined);
+  };
+
+  // Direct submit for sellers (no margin/cost selection)
+  const handleDirectSubmit = async (rowsToSubmit: ProductRowData[], totalMoqValue?: number | string) => {
+    try {
+      setLoading(true);
+      
+      // Transform rows to backend format
+      const productsToCreate = rowsToSubmit.map(row => {
+        const cleanString = (val: string | null | undefined): string | null => {
+          if (!val || val === '' || (typeof val === 'string' && val.trim() === '')) return null;
+          return val;
+        };
+        
+        const countryDeliverables: any[] = [];
+        
+        if (hasPermission('hkUsd') || hasPermission('hkHkd')) {
+          if (row.hkUsd || row.hkHkd) {
+            countryDeliverables.push({
+              country: 'Hongkong',
+              price: parseFloat(String(row.hkUsd)) || 0,
+              usd: parseFloat(String(row.hkUsd)) || 0,
+              xe: parseFloat(String(row.hkXe)) || 0,
+              local: parseFloat(String(row.hkHkd)) || 0,
+              hkd: parseFloat(String(row.hkHkd)) || 0,
+              paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
+              paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
+            });
+          }
+        }
+        
+        if (hasPermission('dubaiUsd') || hasPermission('dubaiAed')) {
+          if (row.dubaiUsd || row.dubaiAed) {
+            countryDeliverables.push({
+              country: 'Dubai',
+              price: parseFloat(String(row.dubaiUsd)) || 0,
+              usd: parseFloat(String(row.dubaiUsd)) || 0,
+              xe: parseFloat(String(row.dubaiXe)) || 0,
+              local: parseFloat(String(row.dubaiAed)) || 0,
+              aed: parseFloat(String(row.dubaiAed)) || 0,
+              paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
+              paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
+            });
+          }
+        }
+
+        return {
+          skuFamilyId: row.skuFamilyId,
+          gradeId: (row.grade && /^[0-9a-fA-F]{24}$/.test(row.grade)) ? row.grade : null,
+          specification: cleanString(row.version) || '',
+          simType: row.sim || '',
+          color: row.colour || '',
+          ram: cleanString(row.ram) || '',
+          storage: row.storage || '',
+          weight: row.weight ? parseFloat(String(row.weight)) : null,
+          condition: cleanString(row.condition) || null,
+          stock: parseFloat(String(row.totalQty)) || 0,
+          country: (cleanString(row.country) || null) as string | null,
+          moq: parseFloat(String(row.moqPerVariant)) || 1,
+          purchaseType: 'full',
+          isNegotiable: row.negotiableFixed === '1',
+          isFlashDeal: row.flashDeal && (row.flashDeal === '1' || row.flashDeal === 'true' || row.flashDeal.toLowerCase() === 'yes') ? 'true' : 'false',
+          startTime: cleanString(row.startTime) ? new Date(row.startTime).toISOString() : '',
+          expiryTime: cleanString(row.endTime) ? new Date(row.endTime).toISOString() : '',
+          groupCode: variantType === 'multi' ? `GROUP-${Date.now()}` : undefined,
+          sequence: row.sequence || null,
+          countryDeliverables,
+          sellerId: hasPermission('supplierId') ? (cleanString(row.supplierId) || getCurrentSellerId()) : getCurrentSellerId(), // Always include sellerId
+          supplierListingNumber: hasPermission('supplierListingNumber') ? (cleanString(row.supplierListingNumber) || '') : '',
+          customerListingNumber: hasPermission('customerListingNumber') ? (cleanString(row.customerListingNumber) || '') : '',
+          packing: hasPermission('packing') ? (cleanString(row.packing) || '') : '',
+          currentLocation: hasPermission('currentLocation') ? (cleanString(row.currentLocation) || '') : '',
+          deliveryLocation: hasPermission('deliveryLocation') && Array.isArray(row.deliveryLocation) ? row.deliveryLocation : [],
+          customMessage: hasPermission('customMessage') ? (cleanString(row.customMessage) || '') : '',
+          totalMoq: variantType === 'multi' && totalMoqValue ? parseFloat(String(totalMoqValue)) : null,
+          paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
+          paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
+          shippingTime: hasPermission('shippingTime') ? (cleanString(row.shippingTime) || '') : '',
+          deliveryTime: hasPermission('deliveryTime') ? (cleanString(row.deliveryTime) || '') : '',
+          vendor: hasPermission('vendor') ? (cleanString(row.vendor) || null) : null,
+          vendorListingNo: hasPermission('vendorListingNo') ? (cleanString(row.vendorListingNo) || '') : '',
+          carrier: hasPermission('carrier') ? (cleanString(row.carrier) || null) : null,
+          carrierListingNo: hasPermission('carrierListingNo') ? (cleanString(row.carrierListingNo) || '') : '',
+          uniqueListingNo: hasPermission('uniqueListingNo') ? (cleanString(row.uniqueListingNo) || '') : '',
+          tags: hasPermission('tags') ? (cleanString(row.tags) || '') : '',
+          remark: hasPermission('remark') ? (cleanString(row.remark) || '') : '',
+          warranty: hasPermission('warranty') ? (cleanString(row.warranty) || '') : '',
+          batteryHealth: hasPermission('batteryHealth') ? (cleanString(row.batteryHealth) || '') : '',
+          lockUnlock: row.lockUnlock === '1',
+        };
+      });
+
+      // Create all product requests using seller service
+      const createPromises = productsToCreate.map(product => 
+        ProductService.createSellerProductRequest(product)
+      );
+
+      await Promise.all(createPromises);
+      
+      // Clear localStorage on successful save
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch (error) {
+        console.error('Error clearing localStorage:', error);
+      }
+      
+      toastHelper.showTost('Product requests submitted successfully! They will be reviewed by admin.', 'success');
+      
+      // Products are already created above - don't call onSave as it would create duplicate products
+      // Navigate directly to products list
+      setTimeout(() => {
+        window.location.href = '/seller/#/products';
+      }, 1000);
+    } catch (error: any) {
+      console.error('Error creating product requests:', error);
+      toastHelper.showTost(error.message || 'Failed to submit product requests', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Removed modal handlers - sellers don't set margins/costs
+
+  // Column definitions - filtered by permissions
+  const allColumns = [
+    { key: 'supplierId', label: 'SUPPLIER ID*', width: 180, group: 'Supplier Info', permissionField: 'supplierId' },
+    { key: 'supplierListingNumber', label: 'SUPPLIER LISTING NO*', width: 180, group: 'Supplier Info', permissionField: 'supplierListingNumber' },
+    { key: 'customerListingNumber', label: 'CUSTOMER LISTING NO*', width: 180, group: 'Supplier Info', permissionField: 'customerListingNumber' },
+    { key: 'skuFamilyId', label: 'SKU Family*', width: 200, group: 'Product Detail', permissionField: 'skuFamilyId' },
+    { key: 'subModelName', label: 'SubModelName*', width: 150, group: 'Product Detail', permissionField: 'subModelName' },
+    { key: 'storage', label: 'Storage*', width: 100, group: 'Product Detail', permissionField: 'storage' },
+    { key: 'colour', label: 'Colour*', width: 100, group: 'Product Detail', permissionField: 'colour' },
+    { key: 'country', label: 'Country*', width: 120, group: 'Product Detail', permissionField: 'country' },
+    { key: 'sim', label: 'SIM*', width: 120, group: 'Product Detail', permissionField: 'sim' },
+    { key: 'version', label: 'VERSION', width: 120, group: 'Product Detail', permissionField: 'version' },
+    { key: 'grade', label: 'GRADE*', width: 120, group: 'Product Detail', permissionField: 'grade' },
+    { key: 'status', label: 'STATUS*', width: 100, group: 'Product Detail', permissionField: 'status' },
+    { key: 'condition', label: 'CONDITION', width: 120, group: 'Product Detail', permissionField: 'condition' },
+    { key: 'lockUnlock', label: 'LOCK/UNLOCK*', width: 120, group: 'Product Detail', permissionField: 'lockUnlock' },
+    { key: 'warranty', label: 'WARRANTY', width: 120, group: 'Product Detail', permissionField: 'warranty' },
+    { key: 'batteryHealth', label: 'BATTERY HEALTH', width: 130, group: 'Product Detail', permissionField: 'batteryHealth' },
+    { key: 'packing', label: 'PACKING*', width: 120, group: 'Pricing/Delivery', permissionField: 'packing' },
+    { key: 'currentLocation', label: 'CURRENT LOCATION*', width: 150, group: 'Pricing/Delivery', permissionField: 'currentLocation' },
+    { key: 'hkUsd', label: 'USD', width: 100, group: 'HK DELIVERY', subgroup: 'HK', permissionField: 'hkUsd' },
+    { key: 'hkXe', label: 'XE', width: 100, group: 'HK DELIVERY', subgroup: 'HK', permissionField: 'hkXe' },
+    { key: 'hkHkd', label: 'HKD', width: 100, group: 'HK DELIVERY', subgroup: 'HK', permissionField: 'hkHkd' },
+    { key: 'dubaiUsd', label: 'USD', width: 110, group: 'DUBAI DELIVERY', subgroup: 'DUBAI', permissionField: 'dubaiUsd' },
+    { key: 'dubaiXe', label: 'XE', width: 110, group: 'DUBAI DELIVERY', subgroup: 'DUBAI', permissionField: 'dubaiXe' },
+    { key: 'dubaiAed', label: 'AED', width: 110, group: 'DUBAI DELIVERY', subgroup: 'DUBAI', permissionField: 'dubaiAed' },
+    { key: 'deliveryLocation', label: 'DELIVERY LOCATION', width: 150, group: 'Pricing/Delivery', permissionField: 'deliveryLocation' },
+    { key: 'customMessage', label: 'CUSTOM MESSAGE', width: 150, group: 'Pricing/Delivery', permissionField: 'customMessage' },
+    { key: 'totalQty', label: 'TOTAL QTY*', width: 100, group: 'Pricing/Delivery', permissionField: 'totalQty' },
+    { key: 'moqPerVariant', label: 'MOQ/VARIANT*', width: 120, group: 'Pricing/Delivery', permissionField: 'moqPerVariant' },
+    { key: 'weight', label: 'WEIGHT', width: 100, group: 'Pricing/Delivery', permissionField: 'weight' },
+    ...(variantType === 'multi' ? [{ key: 'totalMoq', label: 'MOQ PER CART*', width: 150, group: 'Pricing/Delivery', permissionField: 'totalMoq' }] : []),
+    { key: 'paymentTerm', label: 'PAYMENT TERM*', width: 200, group: 'Payment', permissionField: 'paymentTerm' },
+    { key: 'paymentMethod', label: 'PAYMENT METHOD*', width: 200, group: 'Payment', permissionField: 'paymentMethod' },
+    { key: 'negotiableFixed', label: 'NEGOTIABLE/FIXED', width: 150, group: 'Other Info', permissionField: 'negotiableFixed' },
+    { key: 'flashDeal', label: 'FLASH DEAL', width: 130, group: 'Other Info', permissionField: 'flashDeal' },
+    { key: 'shippingTime', label: 'SHIPPING TIME', width: 130, group: 'Other Info', permissionField: 'shippingTime' },
+    { key: 'deliveryTime', label: 'DELIVERY TIME', width: 130, group: 'Other Info', permissionField: 'deliveryTime' },
+    { key: 'vendor', label: 'VENDOR', width: 100, group: 'Other Info', permissionField: 'vendor' },
+    { key: 'vendorListingNo', label: 'VENDOR LISTING NO', width: 150, group: 'Other Info', permissionField: 'vendorListingNo' },
+    { key: 'carrier', label: 'CARRIER', width: 100, group: 'Other Info', permissionField: 'carrier' },
+    { key: 'carrierListingNo', label: 'CARRIER LISTING NO', width: 150, group: 'Other Info', permissionField: 'carrierListingNo' },
+    { key: 'uniqueListingNo', label: 'UNIQUE LISTING NO', width: 150, group: 'Other Info', permissionField: 'uniqueListingNo' },
+    { key: 'tags', label: 'TAGS', width: 150, group: 'Other Info', permissionField: 'tags' },
+    { key: 'adminCustomMessage', label: 'ADMIN CUSTOM MESSAGE', width: 180, group: 'Other Info', permissionField: 'adminCustomMessage' },
+    { key: 'startTime', label: 'START TIME', width: 150, group: 'Other Info', permissionField: 'startTime' },
+    { key: 'endTime', label: 'END TIME *', width: 150, group: 'Other Info', permissionField: 'endTime' },
+    { key: 'remark', label: 'REMARK', width: 150, group: 'Other Info', permissionField: 'remark' },
+  ];
+
+  // Filter columns based on permissions
+  const columns = allColumns.filter(col => {
+    // First 6 system fields that should always be visible (without permission check)
+    const alwaysVisibleFields = [
+      'supplierId',
+      'supplierListingNumber',
+      'customerListingNumber',
+      'skuFamilyId',
+      'subModelName',
+      'storage'
+    ];
+    
+    // Always show first 6 fields
+    if (alwaysVisibleFields.includes(col.key)) {
+      return true;
+    }
+    
+    // For all other fields, check permission
+    if (col.permissionField) {
+      return hasPermission(col.permissionField);
+    }
+    
+    // If no permissionField defined, don't show (strict mode)
+    return false;
+  });
+
+  // Get country options from constants (show name, store code)
+  const countryOptions = constants?.spec?.COUNTRY || [];
+  
+  // Get sim options based on selected country (will be filtered per row)
+  const getSimOptionsForCountry = (countryCode: string) => {
+    if (!constants?.spec?.COUNTRY) return [];
+    const country = constants.spec.COUNTRY.find(c => c.code === countryCode);
+    return country?.SIM || [];
+  };
+  
+  // Get status options from constants (show name, store code)
+  const statusOptions = constants?.status || [];
+  
+  const conditionOptions = ['AAA', 'A+', 'Mixed'];
+  
+  // Get lockStatus options from constants (show name, store code)
+  const lockUnlockOptions = constants?.lockStatus || [];
+  
+  // Get packing options from constants (show name, store code)
+  const packingOptions = constants?.packing || [];
+  
+  // Get currentLocation options from constants (show name, store code)
+  const currentLocationOptions = constants?.currentLocation || [];
+  
+  // Get deliveryLocation options from constants (show name, store code)
+  const deliveryLocationOptions = constants?.deliveryLocation || [];
+  
+  // Get paymentTerm and paymentMethod options from constants
+  const paymentTermOptions = constants?.paymentTerm || [];
+  const paymentMethodOptions = constants?.paymentMethod || [];
+  
+  // NegotiableStatus - using negotiableStatus from constants
+  const negotiableFixedOptions = constants?.negotiableStatus || [];
+  
+  // Get vendor options from constants (show name, store code)
+  const vendorOptions = constants?.vendor || [];
+  
+  // Get carrier options from constants (show name, store code)
+  const carrierOptions = constants?.carrier || [];
+  
+  // Get flashDeal options from constants (show name, store code)
+  const flashDealOptions = constants?.flashDeal || [];
+
+  const renderCell = (row: ProductRowData, rowIndex: number, column: typeof columns[0]) => {
+    const value = row[column.key as keyof ProductRowData];
+    const cellId = `${rowIndex}-${column.key}`;
+
+    switch (column.key) {
+      case 'skuFamilyId':
+        const selectedSkuFamily = skuFamilies.find(sku => sku._id === value);
+        const displayValue = selectedSkuFamily?.name || '';
+        const isRowSearchActive = rowSkuFamilySearch?.rowIndex === rowIndex;
+        const rowSearchQuery = isRowSearchActive ? rowSkuFamilySearch.query : '';
+        
+        return (
+          <div className="min-w-[150px] relative" onFocus={() => setFocusedCell({ row: rowIndex, col: column.key })}>
+            <div className="relative">
+              <input
+                ref={(el) => { cellRefs.current[cellId] = el; }}
+                type="text"
+                value={isRowSearchActive ? rowSearchQuery : displayValue}
+                onChange={(e) => {
+                  const query = e.target.value;
+                  setRowSkuFamilySearch({ rowIndex, query, showResults: true });
+                }}
+                onFocus={() => {
+                  setFocusedCell({ row: rowIndex, col: column.key });
+                  setSelectedRowIndex(rowIndex);
+                  if (!isRowSearchActive) {
+                    // Start with empty query to show all options or current value
+                    setRowSkuFamilySearch({ rowIndex, query: '', showResults: false });
+                  }
+                }}
+                onBlur={() => {
+                  // Delay hiding to allow click on results
+                  setTimeout(() => {
+                    if (rowSkuFamilySearch?.rowIndex === rowIndex) {
+                      setRowSkuFamilySearch(null);
+                    }
+                  }, 200);
+                }}
+                placeholder="Click to search SKU Family..."
+                className="w-full px-2 py-1.5 text-xs border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 placeholder:text-gray-400"
+              />
+              {isRowSearchActive && (
+                <i className="fas fa-search absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs"></i>
+              )}
+            </div>
+            {/* Row-specific Search Results Dropdown */}
+            {isRowSearchActive && rowSkuFamilySearch?.showResults && rowSkuFamilySearchResults.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border-2 w-[270px] border-gray-300 dark:border-gray-600 rounded-lg shadow-xl max-h-96 overflow-y-auto z-[100]">
+                <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-200 dark:border-gray-700">
+                  <div className="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                    Row {rowIndex + 1} - Select SKU Family
+                  </div>
+                </div>
+                {rowSkuFamilySearchResults.map((option, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => handleRowSkuFamilySearchSelect(option, rowIndex)}
+                    className="px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer border-b border-gray-200 dark:border-gray-700 last:border-b-0 transition-colors"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="font-semibold text-sm text-gray-800 dark:text-gray-200">
+                          {option.skuFamilyName}
+                        </div>
+                        <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                          {option.subModelName && <span className="mr-2">Model: {option.subModelName}</span>}
+                          {option.storage && <span className="mr-2">Storage: {option.storage}</span>}
+                          {option.colour && <span className="mr-2">Color: {option.colour}</span>}
+                          {option.ram && <span>RAM: {option.ram}</span>}
+                        </div>
+                      </div>
+                      <i className="fas fa-arrow-right text-blue-500 text-xs mt-1"></i>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {isRowSearchActive && rowSearchQuery && rowSkuFamilySearch?.showResults && rowSkuFamilySearchResults.length === 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border-2 border-gray-300 dark:border-gray-600 rounded-lg shadow-xl p-4 z-[100]">
+                <div className="text-sm text-gray-500 dark:text-gray-400 text-center">
+                  No results found
+                </div>
+              </div>
+            )}
+          </div>
+        );
+
+      case 'subModelName':
+      case 'storage':
+      case 'colour':
+        return (
+          <input
+            ref={(el) => { cellRefs.current[cellId] = el; }}
+            type="text"
+            value={value as string}
+            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
+            className="w-full px-2 py-1.5 text-xs border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 placeholder:text-gray-400"
+            required={column.key === 'subModelName' || column.key === 'storage' || column.key === 'colour'}
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+            placeholder="Enter value or use search"
+          />
+        );
+
+      case 'country':
+        return (
+          <select
+            value={value as string}
+            onChange={(e) => {
+              updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value);
+              // Clear sim when country changes
+              updateRow(rowIndex, 'sim', '');
+            }}
+            className="w-full px-2 py-1.5 text-xs border-0 bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 cursor-pointer appearance-none"
+            required
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+          >
+            <option value="" className="text-gray-500">Select Country</option>
+            {countryOptions.map(opt => (
+              <option key={opt.code} value={opt.code} className="bg-white dark:bg-gray-800">
+                {opt.name}
+              </option>
+            ))}
+          </select>
+        );
+
+      case 'sim':
+        const selectedCountryCode = row.country || '';
+        const availableSimOptions = getSimOptionsForCountry(selectedCountryCode);
+        return (
+          <select
+            value={value as string}
+            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
+            className="w-full px-2 py-1.5 text-xs border-0 bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 cursor-pointer appearance-none"
+            required
+            disabled={!selectedCountryCode}
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+          >
+            <option value="" className="text-gray-500">
+              {!selectedCountryCode ? 'Select Country first' : 'Select SIM'}
+            </option>
+            {availableSimOptions.map(opt => (
+              <option key={opt} value={opt} className="bg-white dark:bg-gray-800">
+                {opt}
+              </option>
+            ))}
+          </select>
+        );
+
+      case 'grade':
+        return (
+          <div className="min-w-[120px]" onFocus={() => setFocusedCell({ row: rowIndex, col: column.key })}>
+            <Select
+              options={grades.map(g => ({ value: g._id, label: g.title }))}
+              value={grades.find(g => g._id === value) ? { value: value as string, label: grades.find(g => g._id === value)?.title } : null}
+              onChange={(opt) => updateRow(rowIndex, column.key as keyof ProductRowData, opt?.value || '')}
+              className="text-xs"
+              classNamePrefix="select"
+              isSearchable
+              placeholder="Select Grade"
+              styles={{
+                control: (provided, state) => ({ 
+                  ...provided, 
+                  minHeight: '32px', 
+                  fontSize: '12px', 
+                  border: 'none', 
+                  boxShadow: state.isFocused ? '0 0 0 2px rgba(59, 130, 246, 0.5)' : 'none',
+                  backgroundColor: 'transparent',
+                  '&:hover': { border: 'none' }
+                }),
+                valueContainer: (provided) => ({ ...provided, padding: '4px 8px' }),
+                input: (provided) => ({ ...provided, margin: '0', padding: '0' }),
+                indicatorsContainer: (provided) => ({ ...provided, height: '32px' }),
+                menu: (provided) => ({ ...provided, zIndex: 9999, boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }),
+              }}
+            />
+          </div>
+        );
+
+      case 'status':
+        return (
+          <select
+            value={value as string}
+            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
+            className="w-full px-2 py-1.5 text-xs border-0 bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 cursor-pointer appearance-none"
+            required
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+          >
+            <option value="" className="text-gray-500">Select Status</option>
+            {statusOptions.map(opt => (
+              <option key={opt.code} value={opt.code} className="bg-white dark:bg-gray-800">
+                {opt.name}
+              </option>
+            ))}
+          </select>
+        );
+
+      case 'condition':
+        return (
+          <select
+            value={value as string}
+            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
+            className="w-full px-2 py-1.5 text-xs border-0 bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 cursor-pointer appearance-none"
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+          >
+            <option value="" className="bg-white dark:bg-gray-800">Select Condition</option>
+            {conditionOptions.map(opt => <option key={opt} value={opt} className="bg-white dark:bg-gray-800">{opt}</option>)}
+          </select>
+        );
+
+      case 'lockUnlock':
+      case 'negotiableFixed':
+        const options = column.key === 'lockUnlock' ? lockUnlockOptions : negotiableFixedOptions;
+        return (
+          <select
+            value={value as string}
+            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
+            className="w-full px-2 py-1 text-xs border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-500"
+            required={column.key === 'lockUnlock'}
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+          >
+            <option value="" className="text-gray-500">Select</option>
+            {options.map(opt => (
+              <option key={opt.code} value={opt.code}>
+                {opt.name}
+              </option>
+            ))}
+          </select>
+        );
+
+      case 'packing':
+        return (
+          <select
+            value={value as string}
+            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
+            className="w-full px-2 py-1 text-xs border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-500"
+            required
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+          >
+            <option value="">Select</option>
+            {packingOptions.map(opt => (
+              <option key={opt.code} value={opt.code}>
+                {opt.name}
+              </option>
+            ))}
+          </select>
+        );
+
+      case 'vendor':
+      case 'carrier':
+        const selectOptions = column.key === 'vendor' ? vendorOptions : carrierOptions;
+        return (
+          <select
+            value={value as string}
+            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
+            className="w-full px-2 py-1 text-xs border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-500"
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+          >
+            <option value="">Select</option>
+            {selectOptions.map(opt => (
+              <option key={opt.code} value={opt.code}>
+                {opt.name}
+              </option>
+            ))}
+          </select>
+        );
+
+      case 'flashDeal':
+        return (
+          <select
+            value={value as string}
+            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
+            className="w-full px-2 py-1 text-xs border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-500"
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+          >
+            <option value="">Select</option>
+            {flashDealOptions.map(opt => (
+              <option key={opt.code} value={opt.code}>
+                {opt.name}
+              </option>
+            ))}
+          </select>
+        );
+
+      case 'paymentTerm':
+        // Convert comma-separated string to array for react-select
+        const selectedTerms = (value as string) 
+          ? (value as string).split(',').map(t => t.trim()).filter(t => t)
+          : [];
+        const selectedTermOptions = paymentTermOptions
+          .filter(opt => selectedTerms.includes(opt.code))
+          .map(opt => ({ value: opt.code, label: opt.name }));
+        
+        return (
+          <div className="min-w-[200px]" onFocus={() => setFocusedCell({ row: rowIndex, col: column.key })}>
+            <Select
+              isMulti
+              options={paymentTermOptions.map(opt => ({ value: opt.code, label: opt.name }))}
+              value={selectedTermOptions}
+              onChange={(selected) => {
+                const selectedValues = selected ? selected.map(opt => opt.value).join(', ') : '';
+                updateRow(rowIndex, column.key as keyof ProductRowData, selectedValues);
+              }}
+              className="text-xs"
+              classNamePrefix="select"
+              isSearchable={false}
+              placeholder="Select terms..."
+              styles={{
+                control: (provided, state) => ({ 
+                  ...provided, 
+                  minHeight: '32px', 
+                  minWidth: '200px',
+                  fontSize: '12px', 
+                  border: 'none', 
+                  boxShadow: state.isFocused ? '0 0 0 2px rgba(59, 130, 246, 0.5)' : 'none',
+                  backgroundColor: 'transparent',
+                  '&:hover': { border: 'none' }
+                }),
+                valueContainer: (provided) => ({ ...provided, padding: '4px 8px', minHeight: '32px' }),
+                input: (provided) => ({ ...provided, margin: '0', padding: '0' }),
+                indicatorsContainer: (provided) => ({ ...provided, height: '32px' }),
+                menu: (provided) => ({ ...provided, zIndex: 9999, boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }),
+                multiValue: (provided) => ({
+                  ...provided,
+                  backgroundColor: '#dbeafe',
+                  fontSize: '11px',
+                }),
+                multiValueLabel: (provided) => ({
+                  ...provided,
+                  color: '#1e40af',
+                  fontWeight: '500',
+                }),
+                multiValueRemove: (provided) => ({
+                  ...provided,
+                  color: '#1e40af',
+                  ':hover': {
+                    backgroundColor: '#93c5fd',
+                    color: '#fff',
+                  },
+                }),
+              }}
+              onFocus={() => {
+                setFocusedCell({ row: rowIndex, col: column.key });
+                setSelectedRowIndex(rowIndex);
+              }}
+              required
+            />
+          </div>
+        );
+
+      case 'paymentMethod':
+        // Convert comma-separated string to array for react-select
+        const selectedMethods = (value as string) 
+          ? (value as string).split(',').map(m => m.trim()).filter(m => m)
+          : [];
+        const selectedOptions = paymentMethodOptions
+          .filter(opt => selectedMethods.includes(opt.code))
+          .map(opt => ({ value: opt.code, label: opt.name }));
+        
+        return (
+          <div className="min-w-[200px]" onFocus={() => setFocusedCell({ row: rowIndex, col: column.key })}>
+            <Select
+              isMulti
+              options={paymentMethodOptions.map(opt => ({ value: opt.code, label: opt.name }))}
+              value={selectedOptions}
+              onChange={(selected) => {
+                const selectedValues = selected ? selected.map(opt => opt.value).join(', ') : '';
+                updateRow(rowIndex, column.key as keyof ProductRowData, selectedValues);
+              }}
+              className="text-xs"
+              classNamePrefix="select"
+              isSearchable={false}
+              placeholder="Select methods..."
+              styles={{
+                control: (provided, state) => ({ 
+                  ...provided, 
+                  minHeight: '32px', 
+                  minWidth: '200px',
+                  fontSize: '12px', 
+                  border: 'none', 
+                  boxShadow: state.isFocused ? '0 0 0 2px rgba(59, 130, 246, 0.5)' : 'none',
+                  backgroundColor: 'transparent',
+                  '&:hover': { border: 'none' }
+                }),
+                valueContainer: (provided) => ({ ...provided, padding: '4px 8px', minHeight: '32px' }),
+                input: (provided) => ({ ...provided, margin: '0', padding: '0' }),
+                indicatorsContainer: (provided) => ({ ...provided, height: '32px' }),
+                menu: (provided) => ({ ...provided, zIndex: 9999, boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }),
+                multiValue: (provided) => ({
+                  ...provided,
+                  backgroundColor: '#dbeafe',
+                  fontSize: '11px',
+                }),
+                multiValueLabel: (provided) => ({
+                  ...provided,
+                  color: '#1e40af',
+                  fontWeight: '500',
+                }),
+                multiValueRemove: (provided) => ({
+                  ...provided,
+                  color: '#1e40af',
+                  ':hover': {
+                    backgroundColor: '#93c5fd',
+                    color: '#fff',
+                  },
+                }),
+              }}
+              onFocus={() => {
+                setFocusedCell({ row: rowIndex, col: column.key });
+                setSelectedRowIndex(rowIndex);
+              }}
+              required
+            />
+          </div>
+        );
+
+      case 'currentLocation':
+        return (
+          <select
+            value={value as string}
+            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
+            className="w-full px-2 py-1 text-xs border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-500"
+            required
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+          >
+            <option value="">Select</option>
+            {currentLocationOptions.map(opt => (
+              <option key={opt.code} value={opt.code}>
+                {opt.name}
+              </option>
+            ))}
+          </select>
+        );
+
+      case 'hkUsd':
+      case 'hkXe':
+      case 'hkHkd':
+      case 'dubaiUsd':
+      case 'dubaiXe':
+      case 'dubaiAed':
+      case 'totalQty':
+      case 'moqPerVariant':
+      case 'weight':
+        return (
+          <input
+            type="number"
+            step={column.key.includes('Xe') || column.key.includes('XE') ? '0.0001' : '0.01'}
+            value={value as string | number}
+            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
+            className="w-full px-2 py-1.5 text-xs border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 text-right font-medium placeholder:text-gray-400"
+            placeholder="0.00"
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+          />
+        );
+
+      case 'totalMoq':
+        // Only render in first row, will span all rows
+        if (rowIndex === 0 && variantType === 'multi') {
+          return (
+            <div className="flex flex-col items-center justify-center w-full h-full py-2">
+              <input
+                type="number"
+                step="0.01"
+                value={totalMoq}
+                onChange={(e) => setTotalMoq(e.target.value)}
+                className="w-full px-2 py-1.5 text-sm border-2 border-purple-300 dark:border-purple-600 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all font-medium text-center"
+                placeholder="0.00"
+                required
+                onFocus={() => {
+                  setFocusedCell({ row: rowIndex, col: column.key });
+                  setSelectedRowIndex(rowIndex);
+                }}
+              />
+              <span className="text-xs text-gray-500 dark:text-gray-400 mt-1 italic">
+                All {rows.length} products
+              </span>
+            </div>
+          );
+        }
+        // Don't render for other rows or single variant
+        return null;
+
+      case 'deliveryLocation':
+        const deliveryValue = Array.isArray(value) ? value : (value ? [value] : []);
+        const deliveryDisplayNames = deliveryValue
+          .map(code => {
+            const option = deliveryLocationOptions.find(opt => opt.code === code);
+            return option ? option.name : code;
+          })
+          .filter(Boolean);
+        
+        return (
+          <div 
+            className="w-full px-2 py-1.5 min-h-[32px] flex items-center"
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+          >
+            {deliveryDisplayNames.length > 0 ? (
+              deliveryDisplayNames.map((name, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex items-center rounded-md text-xs font-medium text-blue-800 dark:text-blue-300"
+                >
+                  {/* <i className="fas fa-map-marker-alt mr-1.5 text-[10px]"></i> */}
+                  {name}{idx < deliveryDisplayNames.length - 1 ? ',' : ''} 
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-gray-400 dark:text-gray-500 italic">
+                Auto-calculated
+              </span>
+            )}
+          </div>
+        );
+
+      case 'startTime':
+      case 'endTime':
+        return (
+          <DatePicker
+            selected={value ? new Date(value as string) : null}
+            onChange={(date) => updateRow(rowIndex, column.key as keyof ProductRowData, date ? date.toISOString() : '')}
+            showTimeSelect
+            timeFormat="HH:mm"
+            dateFormat="yyyy-MM-dd HH:mm"
+            className="w-full px-2 py-1.5 text-xs border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 placeholder:text-gray-400"
+            placeholderText={column.key === 'startTime' ? "Select date & time (auto: current time)" : "Select date & time *"}
+            required={column.key === 'endTime'}
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+            wrapperClassName="w-full"
+          />
+        );
+
+      case 'supplierId':
+        // Display current seller (disabled, cannot be changed)
+        const currentSeller = getCurrentSellerId();
+        const user = StorageService.getItem<any>(STORAGE_KEYS.USER);
+        const sellerName = user?.name || user?.businessName || 'Current Seller';
+        // Ensure supplierId is set in the row data
+        if (value !== currentSeller) {
+          updateRow(rowIndex, 'supplierId' as keyof ProductRowData, currentSeller);
+        }
+        return (
+          <div className="relative">
+            <input
+              type="text"
+              value={sellerName}
+              className="w-full px-2 py-1.5 text-xs border-0 bg-gray-200 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-400 cursor-not-allowed"
+              readOnly
+              disabled
+              title={`Seller ID: ${currentSeller}`}
+            />
+          </div>
+        );
+
+      case 'uniqueListingNo':
+        return (
+          <div className="relative">
+            <input
+              type="text"
+              value={value as string}
+              className="w-full px-2 py-1.5 text-xs border-0 bg-gray-200 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-400 italic"
+              readOnly
+              placeholder="Auto-generated"
+            />
+            <i className="fas fa-barcode absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs"></i>
+          </div>
+        );
+
+      case 'supplierListingNumber':
+        // Read-only, auto-generated field (same as admin panel)
+        return (
+          <div className="relative">
+            <input
+              type="text"
+              value={value as string}
+              className="w-full px-2 py-1.5 text-xs border-0 bg-gray-200 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-400 italic"
+              readOnly
+              disabled
+              placeholder="Auto-generated"
+            />
+            <i className="fas fa-tag absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs"></i>
+          </div>
+        );
+
+      case 'customerListingNumber':
+        // Auto-generated, read-only (same as admin panel)
+        return (
+          <div className="relative">
+            <input
+              type="text"
+              value={value as string}
+              className="w-full px-2 py-1.5 text-xs border-0 bg-gray-200 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-400 italic"
+              readOnly
+              placeholder="Auto-generated"
+            />
+            <i className="fas fa-tag absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs"></i>
+          </div>
+        );
+
+      case 'tags':
+        const tagOptions = constants?.tags || [];
+        // Convert comma-separated string of tag codes to array for react-select
+        const selectedTagCodes = (value as string) 
+          ? (value as string).split(',').map(t => parseInt(t.trim())).filter(t => !isNaN(t))
+          : [];
+        const selectedTagOptions = tagOptions
+          .filter(tag => selectedTagCodes.includes(tag.code))
+          .map(tag => ({ value: String(tag.code), label: tag.tag }));
+        
+        return (
+          <div className="min-w-[150px]" onFocus={() => setFocusedCell({ row: rowIndex, col: column.key })}>
+            <Select
+              isMulti
+              options={tagOptions.map(tag => ({ value: String(tag.code), label: tag.tag }))}
+              value={selectedTagOptions}
+              onChange={(selected) => {
+                const selectedValues = selected ? selected.map(opt => opt.value).join(', ') : '';
+                updateRow(rowIndex, column.key as keyof ProductRowData, selectedValues);
+              }}
+              className="text-xs"
+              classNamePrefix="select"
+              isSearchable={false}
+              placeholder="Select tags..."
+              styles={{
+                control: (provided, state) => ({ 
+                  ...provided, 
+                  minHeight: '32px', 
+                  fontSize: '12px', 
+                  border: 'none', 
+                  boxShadow: state.isFocused ? '0 0 0 2px rgba(59, 130, 246, 0.5)' : 'none',
+                  backgroundColor: 'transparent',
+                  '&:hover': { border: 'none' }
+                }),
+                valueContainer: (provided) => ({ ...provided, padding: '4px 8px', minHeight: '32px' }),
+                input: (provided) => ({ ...provided, margin: '0', padding: '0' }),
+                indicatorsContainer: (provided) => ({ ...provided, height: '32px' }),
+                menu: (provided) => ({ ...provided, zIndex: 9999, boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }),
+                multiValue: (provided) => ({
+                  ...provided,
+                  backgroundColor: '#dbeafe',
+                  fontSize: '11px',
+                }),
+                multiValueLabel: (provided) => ({
+                  ...provided,
+                  color: '#1e40af',
+                  fontWeight: '500',
+                }),
+                multiValueRemove: (provided) => ({
+                  ...provided,
+                  color: '#1e40af',
+                  ':hover': {
+                    backgroundColor: '#93c5fd',
+                    color: '#fff',
+                  },
+                }),
+              }}
+              onFocus={() => {
+                setFocusedCell({ row: rowIndex, col: column.key });
+                setSelectedRowIndex(rowIndex);
+              }}
+            />
+          </div>
+        );
+
+      case 'shippingTime':
+        const shippingTimeValue = value as string;
+        
+        // Helper function to format date as YYYY-MM-DD
+        const formatDate = (date: Date): string => {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        };
+        
+        // Helper function to get today's date
+        const getToday = (): Date => {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          return today;
+        };
+        
+        // Helper function to get tomorrow's date
+        const getTomorrow = (): Date => {
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          tomorrow.setHours(0, 0, 0, 0);
+          return tomorrow;
+        };
+        
+        // Determine current selected date value and detect mode from value
+        let selectedDate: Date | null = null;
+        let detectedMode: 'today' | 'tomorrow' | 'calendar' | '' = '';
+        
+        if (shippingTimeValue) {
+          try {
+            const dateValue = new Date(shippingTimeValue);
+            dateValue.setHours(0, 0, 0, 0);
+            selectedDate = dateValue;
+            
+            // Auto-detect if it's today or tomorrow
+            const todayStr = formatDate(getToday());
+            const tomorrowStr = formatDate(getTomorrow());
+            const valueStr = formatDate(dateValue);
+            
+            if (valueStr === todayStr) {
+              detectedMode = 'today';
+            } else if (valueStr === tomorrowStr) {
+              detectedMode = 'tomorrow';
+            } else {
+              detectedMode = 'calendar';
+            }
+          } catch (e) {
+            selectedDate = null;
+            detectedMode = '';
+          }
+        }
+        
+        // Use stored mode if exists, otherwise use detected mode
+        const storedMode = shippingTimeMode[rowIndex];
+        const currentMode = storedMode || detectedMode;
+        
+        return (
+          <div className="w-full" onFocus={() => setFocusedCell({ row: rowIndex, col: column.key })}>
+            {/* Dropdown for selection */}
+            <select
+              value={currentMode || ''}
+              onChange={(e) => {
+                const selectedMode = e.target.value as 'today' | 'tomorrow' | 'calendar' | '';
+                const newMode = selectedMode || '';
+                
+                // Update mode state
+                setShippingTimeMode((prev) => {
+                  const updated = { ...prev };
+                  if (newMode === '' || newMode === 'today' || newMode === 'tomorrow' || newMode === 'calendar') {
+                    updated[rowIndex] = newMode;
+                  }
+                  return updated;
+                });
+                
+                if (selectedMode === 'today') {
+                  const today = getToday();
+                  const todayStr = formatDate(today);
+                  updateRow(rowIndex, column.key as keyof ProductRowData, todayStr);
+                } else if (selectedMode === 'tomorrow') {
+                  const tomorrow = getTomorrow();
+                  const tomorrowStr = formatDate(tomorrow);
+                  updateRow(rowIndex, column.key as keyof ProductRowData, tomorrowStr);
+                } else if (selectedMode === 'calendar') {
+                  // Keep existing value or set to today if empty
+                  if (!shippingTimeValue) {
+                    const today = getToday();
+                    const todayStr = formatDate(today);
+                    updateRow(rowIndex, column.key as keyof ProductRowData, todayStr);
+                  }
+                } else {
+                  // Clear value when "Select shipping time" is chosen
+                  updateRow(rowIndex, column.key as keyof ProductRowData, '');
+                }
+              }}
+              className="w-full px-2 py-1.5 text-xs border-0 bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 cursor-pointer appearance-none"
+              onFocus={() => {
+                setFocusedCell({ row: rowIndex, col: column.key });
+                setSelectedRowIndex(rowIndex);
+              }}
+            >
+              <option value="">Select shipping time</option>
+              <option value="today">Today</option>
+              <option value="tomorrow">Tomorrow</option>
+              <option value="calendar">Calendar</option>
+            </select>
+            
+            {/* Show date picker only when calendar is selected */}
+            {(currentMode === 'calendar' || currentMode === '') && (
+              <div className="mt-1">
+                <DatePicker
+                  selected={selectedDate}
+                  onChange={(date) => {
+                    if (date) {
+                      const dateStr = formatDate(date);
+                      updateRow(rowIndex, column.key as keyof ProductRowData, dateStr);
+                    } else {
+                      updateRow(rowIndex, column.key as keyof ProductRowData, '');
+                    }
+                  }}
+                  dateFormat="yyyy-MM-dd"
+                  className="w-full px-2 py-1.5 text-xs border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 placeholder:text-gray-400"
+                  placeholderText="Select date"
+                  minDate={getToday()}
+                  onFocus={() => {
+                    setFocusedCell({ row: rowIndex, col: column.key });
+                    setSelectedRowIndex(rowIndex);
+                  }}
+                  wrapperClassName="w-full"
+                />
+              </div>
+            )}
+          </div>
+        );
+
+      default:
+        return (
+          <input
+            type="text"
+            value={value as string}
+            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
+            className="w-full px-2 py-1.5 text-xs border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 placeholder:text-gray-400"
+            required={column.key === 'supplierListingNumber'}
+            onFocus={() => {
+              setFocusedCell({ row: rowIndex, col: column.key });
+              setSelectedRowIndex(rowIndex);
+            }}
+            placeholder={column.key.includes('message') || column.key.includes('Message') ? 'Enter message...' : 'Enter value...'}
+          />
+        );
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12 bg-white dark:bg-gray-900">
+        <div className="relative">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-200 dark:border-blue-900 border-t-blue-600 dark:border-t-blue-400"></div>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <i className="fas fa-spinner text-blue-600 dark:text-blue-400 text-lg animate-spin"></i>
+          </div>
+        </div>
+        <p className="mt-4 text-sm font-medium text-gray-600 dark:text-gray-400">Loading form data...</p>
+      </div>
+    );
+  }
+
+
+  const totalWidth = columns.reduce((sum, col) => sum + col.width + 1, 0);
+
+  return (
+    <>
+    <form onSubmit={handleSubmit} className="flex flex-col h-full">
+      {/* Enhanced Toolbar */}
+      <div className="bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-700 px-6 py-3 flex items-center justify-between sticky top-0 z-20 shadow-md">
+        <div className="flex items-center gap-3 flex-1">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={addRow}
+              className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+              title="Add Row (Ctrl+N or Cmd+N)"
+            >
+              <i className="fas fa-plus text-sm"></i>
+              <span>Add Row</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (rows.length > 0) {
+                  duplicateRow(rows.length - 1);
+                }
+              }}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+              title="Duplicate Last Row"
+            >
+              <i className="fas fa-copy text-sm"></i>
+              <span>Duplicate</span>
+            </button>
+          </div>
+          <div className="h-8 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
+          {/* SKU Family Search Field */}
+          {/* <div className="relative flex-1 max-w-md">
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setShowSearchResults(true);
+                }}
+                onFocus={() => {
+                  if (searchQuery && searchResults.length > 0) {
+                    setShowSearchResults(true);
+                  }
+                }}
+                onBlur={() => {
+                  // Delay hiding to allow click on results
+                  setTimeout(() => setShowSearchResults(false), 200);
+                }}
+                placeholder="Search SKU Family, SubModel, Storage, Colour..."
+                className="w-full px-4 py-2 pl-10 pr-4 text-sm border-2 border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              />
+              <i className="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm"></i>
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setShowSearchResults(false);
+                  }}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  <i className="fas fa-times text-sm"></i>
+                </button>
+              )}
+            </div>
+            {showSearchResults && searchResults.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border-2 border-gray-300 dark:border-gray-600 rounded-lg shadow-xl max-h-96 overflow-y-auto z-50">
+                <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-200 dark:border-gray-700">
+                  <div className="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                    {selectedRowIndex !== null 
+                      ? `Will fill Row ${selectedRowIndex + 1} (click row number to change)`
+                      : focusedCell?.row !== undefined
+                      ? `Will fill Row ${focusedCell.row + 1} (click row number to select different row)`
+                      : 'Will fill Row 1 (click row number to select different row)'}
+                  </div>
+                </div>
+                {searchResults.map((option, idx) => {
+                  const targetRow = selectedRowIndex !== null ? selectedRowIndex : (focusedCell?.row ?? 0);
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => handleSearchSelect(option, targetRow)}
+                      className="px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer border-b border-gray-200 dark:border-gray-700 last:border-b-0 transition-colors"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="font-semibold text-sm text-gray-800 dark:text-gray-200">
+                            {option.skuFamilyName}
+                          </div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                            {option.subModelName && <span className="mr-2">Model: {option.subModelName}</span>}
+                            {option.storage && <span className="mr-2">Storage: {option.storage}</span>}
+                            {option.colour && <span className="mr-2">Color: {option.colour}</span>}
+                            {option.ram && <span>RAM: {option.ram}</span>}
+                          </div>
+                        </div>
+                        <i className="fas fa-arrow-right text-blue-500 text-xs mt-1"></i>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {showSearchResults && searchQuery && searchResults.length === 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border-2 border-gray-300 dark:border-gray-600 rounded-lg shadow-xl p-4 z-50">
+                <div className="text-sm text-gray-500 dark:text-gray-400 text-center">
+                  No results found
+                </div>
+              </div>
+            )}
+          </div> */}
+          {/* <div className="h-8 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div> */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+              <i className="fas fa-table text-blue-500 text-sm"></i>
+              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                {rows.length} {rows.length === 1 ? 'Row' : 'Rows'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+              <i className="fas fa-columns text-purple-500 text-sm"></i>
+              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                {columns.length} Columns
+              </span>
+            </div>
+            {variantType === 'multi' && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 rounded-lg border border-purple-300 dark:border-purple-700 shadow-sm">
+                <i className="fas fa-layer-group text-purple-600 dark:text-purple-400 text-sm"></i>
+                <span className="text-xs font-semibold text-purple-700 dark:text-purple-300">
+                  Multi-Variant Mode
+                </span>
+              </div>
+            )}
+            {/* <div className="flex items-center gap-2 px-3 py-1.5 bg-green-100 dark:bg-green-900/40 rounded-lg border border-green-300 dark:border-green-700 shadow-sm">
+              <i className="fas fa-save text-green-600 dark:text-green-400 text-sm"></i>
+              <span className="text-xs font-semibold text-green-700 dark:text-green-300">
+                Auto-saved
+              </span>
+            </div> */}
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* <button
+            type="button"
+            onClick={() => {
+              if (window.confirm('Are you sure you want to clear all saved form data?')) {
+                try {
+                  localStorage.removeItem(STORAGE_KEY);
+                  toastHelper.showTost('Saved form data cleared', 'success');
+                } catch (error) {
+                  console.error('Error clearing localStorage:', error);
+                  toastHelper.showTost('Error clearing saved data', 'error');
+                }
+              }
+            }}
+            className="px-4 py-2 bg-yellow-500 text-white text-sm font-medium rounded-lg hover:bg-yellow-600 border-2 border-yellow-600 shadow-sm hover:shadow-md transition-all duration-200 flex items-center gap-2"
+            title="Clear saved form data from localStorage"
+          >
+            <i className="fas fa-trash-alt text-sm"></i>
+            <span>Clear Saved</span>
+          </button> */}
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-5 py-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 border-2 border-gray-300 dark:border-gray-600 shadow-sm hover:shadow-md transition-all duration-200"
+          >
+            <i className="fas fa-times mr-2"></i>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="px-6 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center gap-2"
+          >
+            <i className="fas fa-save text-sm"></i>
+            <span>Save All Products</span>
+            <span className="ml-1 px-2 py-0.5 bg-blue-500 rounded-full text-xs font-bold">
+              {rows.length}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* Excel-like Table with Enhanced Styling */}
+      <div 
+        ref={tableRef}
+        className="flex-1 overflow-auto bg-white dark:bg-gray-900 relative"
+        style={{ maxHeight: 'calc(100vh - 136px)' }}
+      >
+        {/* Scroll Shadow Indicators */}
+        {/* <div className="absolute top-0 right-0 w-8 h-full bg-gray-100 dark:bg-gray-800 pointer-events-none z-10 opacity-50"></div> */}
+        {/* <div className="absolute bottom-0 left-0 w-full h-8 bg-gray-100 dark:bg-gray-800 pointer-events-none z-10 opacity-50"></div> */}
+        <div style={{ width: `${totalWidth}px`, minWidth: '100%' }}>
+          {/* Enhanced Column Headers with Groups */}
+          <div className="sticky top-0 z-10 shadow-lg">
+            {/* Group Headers for Price Sections */}
+            <div className="flex border-b border-gray-300 dark:border-gray-600">
+              <div className="min-w-12 border-r-2 border-gray-400 dark:border-gray-600 bg-gray-300 dark:bg-gray-800 sticky left-0 z-10"></div>
+              {columns.map((col) => {
+                const hkCols = columns.filter(c => c.subgroup === 'HK');
+                const dubaiCols = columns.filter(c => c.subgroup === 'DUBAI');
+                const paymentTermCols = columns.filter(c => c.subgroup === 'PAYMENT_TERM');
+                const paymentMethodCols = columns.filter(c => c.subgroup === 'PAYMENT_METHOD');
+                const hkWidth = hkCols.reduce((sum, c) => sum + c.width, 0);
+                const dubaiWidth = dubaiCols.reduce((sum, c) => sum + c.width, 0);
+                const paymentTermWidth = paymentTermCols.reduce((sum, c) => sum + c.width, 0);
+                const paymentMethodWidth = paymentMethodCols.reduce((sum, c) => sum + c.width, 0);
+                
+                // Check if this is the first column of a group
+                if (col.key === 'hkUsd') {
+                  return (
+                    <div
+                      key={`group-hk`}
+                      className="bg-blue-500 dark:bg-blue-700 px-3 py-2 text-xs font-bold text-white text-center border-r-2 border-blue-600 dark:border-blue-800 shadow-inner"
+                      style={{ width: `${hkWidth}px`, minWidth: `${hkWidth}px` }}
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        <i className="fas fa-dollar-sign text-xs"></i>
+                        <span>HK DELIVERY PRICE</span>
+                      </div>
+                    </div>
+                  );
+                } else if (col.key === 'dubaiUsd') {
+                  return (
+                    <div
+                      key={`group-dubai`}
+                      className="bg-green-500 dark:bg-green-700 px-3 py-2 text-xs font-bold text-white text-center border-r-2 border-green-600 dark:border-green-800 shadow-inner"
+                      style={{ width: `${dubaiWidth}px`, minWidth: `${dubaiWidth}px` }}
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        <i className="fas fa-dollar-sign text-xs"></i>
+                        <span>DUBAI DELIVERY PRICE</span>
+                      </div>
+                    </div>
+                  );
+                } else if (col.key === 'paymentTermUsd') {
+                  return (
+                    <div
+                      key={`group-payment-term`}
+                      className="bg-purple-500 dark:bg-purple-700 px-3 py-2 text-xs font-bold text-white text-center border-r-2 border-purple-600 dark:border-purple-800 shadow-inner"
+                      style={{ width: `${paymentTermWidth}px`, minWidth: `${paymentTermWidth}px` }}
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        <i className="fas fa-calendar-check text-xs"></i>
+                        <span>PAYMENT TERM</span>
+                      </div>
+                    </div>
+                  );
+                } else if (col.key === 'paymentMethodUsd') {
+                  return (
+                    <div
+                      key={`group-payment-method`}
+                      className="bg-orange-500 dark:bg-orange-700 px-3 py-2 text-xs font-bold text-white text-center border-r-2 border-orange-600 dark:border-orange-800 shadow-inner"
+                      style={{ width: `${paymentMethodWidth}px`, minWidth: `${paymentMethodWidth}px` }}
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        <i className="fas fa-credit-card text-xs"></i>
+                        <span>PAYMENT METHOD</span>
+                      </div>
+                    </div>
+                  );
+                } else if (col.subgroup) {
+                  // Skip rendering for other columns in the group (they're covered by the group header)
+                  return null;
+                } else {
+                  // Regular column - show empty space for alignment
+                  return (
+                    <div
+                      key={`group-empty-${col.key}`}
+                      className="border-r border-gray-300 dark:border-gray-600 bg-gray-200 dark:bg-gray-800"
+                      style={{ width: `${col.width}px`, minWidth: `${col.width}px` }}
+                    ></div>
+                  );
+                }
+              })}
+            </div>
+            {/* Column Headers with Better Styling */}
+            <div className="flex border-b-2 border-gray-400 dark:border-gray-600 bg-gray-200 dark:bg-gray-800">
+              <div className="min-w-12 border-r-2 border-gray-400 dark:border-gray-600 bg-gray-400 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-800 dark:text-gray-200 sticky left-0 z-10 shadow-md">
+                <i className="fas fa-hashtag mr-1"></i>
+                #
+              </div>
+              {columns.map((col) => (
+                <div
+                  key={col.key}
+                  className={`px-3 py-3 text-xs font-bold text-gray-800 dark:text-gray-200 border-r border-gray-300 dark:border-gray-600 whitespace-nowrap hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors cursor-default ${
+                    col.subgroup === 'HK' 
+                      ? 'bg-blue-50 dark:bg-blue-900/30' 
+                      : col.subgroup === 'DUBAI' 
+                      ? 'bg-green-50 dark:bg-green-900/30'
+                      : col.subgroup === 'PAYMENT_TERM'
+                      ? 'bg-purple-50 dark:bg-purple-900/30'
+                      : col.subgroup === 'PAYMENT_METHOD'
+                      ? 'bg-orange-50 dark:bg-orange-900/30'
+                      : 'bg-gray-200 dark:bg-gray-800'
+                  }`}
+                  style={{ width: `${col.width}px`, minWidth: `${col.width}px` }}
+                  title={col.label}
+                >
+                  <div className="flex items-center gap-1">
+                    {col.label.includes('*') && (
+                      <span className="text-red-500 text-xs">*</span>
+                    )}
+                    <span className="truncate">{col.label.replace('*', '')}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Enhanced Rows */}
+          <div ref={rowsContainerRef} className="relative">
+            {variantType === 'multi' && rows.length > 0 && totalMoqLeft > 0 && (() => {
+              const totalMoqCol = columns.find(col => col.key === 'totalMoq');
+              if (!totalMoqCol) return null;
+              
+              return (
+                <div
+                  ref={totalMoqCellRef}
+                  className="px-0 py-1.5 border-r border-purple-300 dark:border-purple-600 bg-purple-50 dark:bg-purple-900/30 absolute"
+                  style={{ 
+                    width: `${totalMoqCol.width}px`, 
+                    minWidth: `${totalMoqCol.width}px`,
+                    left: `${totalMoqLeft}px`,
+                    top: '0',
+                    height: totalMoqHeight > 0 ? `${totalMoqHeight}px` : `${rows.length * 40}px`,
+                    minHeight: totalMoqHeight > 0 ? `${totalMoqHeight}px` : `${rows.length * 40}px`,
+                    zIndex: 10
+                  }}
+                  title={`MOQ PER CART for all ${rows.length} products`}
+                >
+                  <div className="w-full h-full flex flex-col items-center justify-center px-2">
+                    {renderCell(rows[0], 0, totalMoqCol)}
+                  </div>
+                </div>
+              );
+            })()}
+            {rows.map((row, rowIndex) => (
+              <div
+                key={rowIndex}
+                className={`flex border-b border-gray-200 dark:border-gray-700 transition-all duration-150 ${
+                  rowIndex % 2 === 0 
+                    ? 'bg-white dark:bg-gray-900' 
+                    : 'bg-gray-50/50 dark:bg-gray-800/30'
+                } ${
+                  focusedCell?.row === rowIndex
+                    ? 'bg-blue-50 dark:bg-blue-900/20 shadow-inner'
+                    : 'hover:bg-blue-50/50 dark:hover:bg-blue-900/10'
+                }`}
+              >
+                {/* Enhanced Row Number */}
+                <div className="min-w-12 border-r-2 border-gray-300 dark:border-gray-700 bg-gray-200 dark:bg-gray-800 flex items-center justify-center text-xs font-bold text-gray-700 dark:text-gray-300 sticky left-0 z-5 shadow-sm">
+                  <div className="flex flex-col items-center gap-2">
+                    <div 
+                      onClick={() => setSelectedRowIndex(rowIndex)}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-white font-bold shadow-md cursor-pointer transition-all ${
+                        selectedRowIndex === rowIndex 
+                          ? 'bg-green-600 dark:bg-green-700 ring-2 ring-green-400 ring-offset-2' 
+                          : 'bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-600'
+                      }`}
+                      title={selectedRowIndex === rowIndex ? 'Selected for search fill (click to deselect)' : 'Click to select this row for search fill'}
+                    >
+                      {rowIndex + 1}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => duplicateRow(rowIndex)}
+                        className="p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded transition-colors"
+                        title="Duplicate Row"
+                      >
+                        <i className="fas fa-copy text-xs"></i>
+                      </button>
+                      {rows.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeRow(rowIndex)}
+                          className="p-1 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors"
+                          title="Delete Row"
+                        >
+                          <i className="fas fa-trash text-xs"></i>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Enhanced Cells */}
+                {columns.map((col) => {
+                  // For totalMoq column in multi-variant mode:
+                  // - Render invisible placeholder in all rows to maintain column alignment
+                  // - The actual spanning cell is rendered outside the row loop
+                  // - Use ref on first row's placeholder to measure position
+                  if (col.key === 'totalMoq' && variantType === 'multi') {
+                    return (
+                      <div
+                        key={`${rowIndex}-${col.key}`}
+                        ref={rowIndex === 0 ? totalMoqPlaceholderRef : null}
+                        className="px-0 py-1.5 border-r border-gray-200 dark:border-gray-700"
+                        style={{ 
+                          width: `${col.width}px`, 
+                          minWidth: `${col.width}px`,
+                          visibility: 'hidden',
+                          pointerEvents: 'none'
+                        }}
+                        aria-hidden="true"
+                      />
+                    );
+                  }
+                  
+                  // Regular columns (not totalMoq or totalMoq in single variant)
+                  return (
+                    <div
+                      key={`${rowIndex}-${col.key}`}
+                      className={`px-0 py-1.5 border-r border-gray-200 dark:border-gray-700 relative group transition-all duration-150 flex ${
+                        focusedCell?.row === rowIndex && focusedCell?.col === col.key
+                          // ? 'ring-2 ring-blue-500 ring-offset-1 z-10 bg-blue-50 dark:bg-blue-900/30 shadow-md'
+                          ? ''
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                      }`}
+                      style={{ 
+                        width: `${col.width}px`, 
+                        minWidth: `${col.width}px`,
+                        justifyContent:'center',
+                        alignItems:'center'
+                      }}
+                      onDoubleClick={() => fillAllBelow(rowIndex, col.key)}
+                      title="Double-click to fill all below"
+                    >
+                      <div className="px-2">
+                        {renderCell(row, rowIndex, col)}
+                      </div>
+                    {rowIndex < rows.length - 1 && focusedCell?.row === rowIndex && focusedCell?.col === col.key && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          fillDown(rowIndex, col.key);
+                        }}
+                        className="absolute bottom-1 right-1 bg-blue-600 text-white text-xs px-2 py-1 rounded-lg shadow-lg hover:bg-blue-700 z-20 transform hover:scale-110 transition-all duration-200 flex items-center gap-1"
+                        title="Fill Down (Ctrl+D)"
+                      >
+                        <i className="fas fa-arrow-down text-xs"></i>
+                        <span className="text-xs font-medium">Fill</span>
+                      </button>
+                    )}
+                    {/* Hover indicator */}
+                    <div className="absolute inset-0 border-2 border-transparent group-hover:border-blue-300 dark:group-hover:border-blue-700 rounded pointer-events-none transition-all duration-150"></div>
+                  </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </form>
+
+      {/* Modals removed - sellers don't set margins/costs */}
+    </>
+  );
+};
+
+export default ExcelLikeProductForm;
