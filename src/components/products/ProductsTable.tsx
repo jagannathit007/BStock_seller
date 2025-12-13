@@ -163,8 +163,10 @@ const ProductsTable: React.FC = () => {
   };
 
   const handleEdit = (product: Product) => {
-    setEditProduct(product);
-    setIsModalOpen(true);
+    if (product._id) {
+      // Navigate to ProductVariantForm with product ID for editing
+      navigate(`/products/create?editId=${product._id}`);
+    }
   };
 
   const handleVerify = async (product: Product) => {
@@ -426,9 +428,7 @@ const ProductsTable: React.FC = () => {
                           : item.name || "-"}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                        {typeof item.subSkuFamilyId === "object" && item.subSkuFamilyId !== null 
-                          ? item.subSkuFamilyId.name || "-"
-                          : "-"}
+                        {item.specification || "-"}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                         {item.simType}

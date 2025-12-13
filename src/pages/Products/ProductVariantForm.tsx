@@ -11,18 +11,27 @@ const ProductVariantForm: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const typeParam = searchParams.get('type');
+  const editId = searchParams.get('editId');
+  const [editProduct, setEditProduct] = useState<any | null>(null);
+  const [editProducts, setEditProducts] = useState<any[]>([]); // For multi-variant products
+  const [loadingProduct, setLoadingProduct] = useState(false);
   
   // Initialize step and variantType based on URL parameter
-  // If type param is provided, skip selection and go directly to form
   const getInitialStep = (): PageStep => {
+    if (editId) {
+      return 'form'; // Go directly to form when editing
+    }
     if (typeParam === 'single' || typeParam === 'multi') {
       return 'form'; // Go directly to form when type is specified
     }
-    // If no type param, show selection (but this shouldn't happen if modal is used)
     return 'variant-selection';
   };
 
   const getInitialVariantType = (): 'single' | 'multi' | null => {
+    if (editId) {
+      // Will be determined after loading product
+      return null;
+    }
     if (typeParam === 'single') {
       return 'single';
     }
@@ -36,9 +45,113 @@ const ProductVariantForm: React.FC = () => {
   const [variantType, setVariantType] = useState<'single' | 'multi' | null>(getInitialVariantType());
   const [selectedVariants, setSelectedVariants] = useState<VariantOption[]>([]);
   const [loading, setLoading] = useState(false);
-  // For multi variant, initialize with empty variant to allow form entry
+  
+  // Load product data when editing
   useEffect(() => {
-    if (variantType === 'multi' && typeParam === 'multi' && selectedVariants.length === 0) {
+    const loadProductForEdit = async () => {
+      if (!editId) return;
+      
+      try {
+        setLoadingProduct(true);
+        const response = await ProductService.get({ id: editId });
+        const product = response.data;
+        
+        console.log('Loaded product for edit:', product);
+        
+        if (!product) {
+          toastHelper.showTost('Product not found', 'error');
+          navigate('/products');
+          return;
+        }
+        
+        // Check if it's a multi-variant product (has groupCode)
+        const groupCode = (product as any).groupCode;
+        if (groupCode) {
+          // Load all products with the same groupCode
+          const listResponse = await ProductService.list({ page: 1, limit: 1000 });
+          const allProducts = listResponse.data?.docs || listResponse.data || [];
+          const groupedProducts = Array.isArray(allProducts) 
+            ? allProducts.filter((p: any) => p.groupCode === groupCode)
+            : [];
+          
+          setEditProducts(groupedProducts);
+          setVariantType('multi');
+          
+          // Set variants from products
+          const variants: VariantOption[] = groupedProducts.map((p: any) => {
+            const skuFamily = typeof p.skuFamilyId === 'object' ? p.skuFamilyId : null;
+            // Get subModelName from specification
+            let subModelName = '';
+            if (p.specification) {
+              subModelName = p.specification;
+            } else if (skuFamily && (skuFamily as any).subSkuFamilies && Array.isArray((skuFamily as any).subSkuFamilies)) {
+              const matchingSubSku = (skuFamily as any).subSkuFamilies.find((sub: any) => sub.subName);
+              if (matchingSubSku && matchingSubSku.subName) {
+                subModelName = matchingSubSku.subName;
+              }
+            }
+            return {
+              skuFamilyId: typeof p.skuFamilyId === 'object' ? p.skuFamilyId._id : p.skuFamilyId,
+              subModelName: subModelName,
+              storage: p.storage || '',
+              color: p.color || '',
+              ram: p.ram || '',
+            };
+          });
+          setSelectedVariants(variants);
+        } else {
+          // Single variant product
+          console.log('Setting single variant product:', product);
+          setEditProduct(product);
+          // Also set editProducts array for single variant so ExcelLikeProductForm can detect edit mode
+          setEditProducts([product]);
+          setVariantType('single');
+          
+          const skuFamily = typeof product.skuFamilyId === 'object' ? product.skuFamilyId : null;
+          // Get subModelName from specification or find matching subSkuFamily
+          let subModelName = '';
+          if (product.specification) {
+            subModelName = product.specification;
+          } else if (skuFamily && (skuFamily as any).subSkuFamilies && Array.isArray((skuFamily as any).subSkuFamilies)) {
+            const matchingSubSku = (skuFamily as any).subSkuFamilies.find((sub: any) => sub.subName);
+            if (matchingSubSku && matchingSubSku.subName) {
+              subModelName = matchingSubSku.subName;
+            }
+          }
+          const variant = {
+            skuFamilyId: typeof product.skuFamilyId === 'object' ? product.skuFamilyId._id : product.skuFamilyId,
+            subModelName: subModelName,
+            storage: product.storage || '',
+            color: product.color || '',
+            ram: product.ram || '',
+          };
+          console.log('Setting selected variant:', variant);
+          setSelectedVariants([variant]);
+        }
+        
+        setStep('form');
+        
+        // Clear localStorage when editing to prevent conflicts
+        try {
+          localStorage.removeItem('variant-product-form-data');
+        } catch (error) {
+          console.error('Error clearing localStorage:', error);
+        }
+      } catch (error: any) {
+        console.error('Error loading product for edit:', error);
+        toastHelper.showTost(error.message || 'Failed to load product', 'error');
+        navigate('/products');
+      } finally {
+        setLoadingProduct(false);
+      }
+    };
+    
+    loadProductForEdit();
+  }, [editId, navigate]);
+  
+  // For multi variant, initialize with empty variant to allow form entry (only if not editing)
+  useEffect(() => {
+    if (!editId && variantType === 'multi' && typeParam === 'multi' && selectedVariants.length === 0) {
       // Create an empty variant to allow form entry
       setSelectedVariants([{
         skuFamilyId: '',
@@ -48,7 +161,7 @@ const ProductVariantForm: React.FC = () => {
         ram: '',
       }]);
     }
-  }, [variantType, typeParam, selectedVariants.length]);
+  }, [variantType, typeParam, selectedVariants.length, editId]);
 
   const handleVariantSelection = (type: 'single' | 'multi') => {
     setVariantType(type);
@@ -148,28 +261,59 @@ const ProductVariantForm: React.FC = () => {
           });
         }
 
+        // Helper to normalize color to match enum values
+        const normalizeColor = (color: string | null | undefined): string | null => {
+          if (!color) return null;
+          const colorUpper = color.toUpperCase().trim();
+          // Map common color values to enum values
+          const colorMap: Record<string, string> = {
+            'GRAPHITE': 'Graphite',
+            'SILVER': 'Silver',
+            'GOLD': 'Gold',
+            'SIERRA BLUE': 'Sierra Blue',
+            'MIXED': 'Mixed',
+          };
+          return colorMap[colorUpper] || color; // Return mapped value or original if not in map
+        };
+
+        // Helper to normalize country to match enum values
+        const normalizeCountry = (country: string | null | undefined): string | null => {
+          if (!country) return null;
+          const countryUpper = country.toUpperCase().trim();
+          // Map common country codes/values to enum values
+          if (countryUpper === 'HK' || countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG') {
+            return 'Hongkong';
+          }
+          if (countryUpper === 'D' || countryUpper === 'DUBAI' || countryUpper === 'USA') {
+            return 'Dubai';
+          }
+          return country; // Return original if already correct format
+        };
+
         return {
           skuFamilyId: row.skuFamilyId, // Already validated above - required field
           gradeId: (row.grade && isValidObjectId(row.grade)) ? row.grade : null,
-          specification: cleanString(row.version) || '',
+          specification: cleanString(row.subModelName) || cleanString(row.version) || cleanString((row as any).specification) || '',
           simType: row.sim || '',
-          color: row.colour || '',
+          color: normalizeColor(row.colour) || null,
           ram: cleanString(row.ram) || '',
           storage: row.storage || '',
           weight: row.weight ? parseFloat(String(row.weight)) : null,
           condition: cleanString(row.condition) || null,
           price: parseFloat(String(row.hkUsd || row.dubaiUsd || 0)),
           stock: parseFloat(String(row.totalQty)) || 0,
-          country: (cleanString(row.country) || null) as string | null,
+          country: normalizeCountry(cleanString(row.country)) || null,
           moq: parseFloat(String(row.moqPerVariant)) || 1,
-          purchaseType: 'full',
+          purchaseType: (row.purchaseType === 'full' || row.purchaseType === 'partial') ? row.purchaseType : 'partial',
           isNegotiable: row.negotiableFixed === '1',
           // Use flashDeal field from form (code value from constants), convert to boolean string
           // Assuming code '1' or 'true' means flash deal enabled, empty or '0'/'false' means disabled
           isFlashDeal: row.flashDeal && (row.flashDeal === '1' || row.flashDeal === 'true' || row.flashDeal.toLowerCase() === 'yes') ? 'true' : 'false',
           startTime: cleanString(row.startTime) ? new Date(row.startTime).toISOString() : '',
           expiryTime: cleanString(row.endTime) ? new Date(row.endTime).toISOString() : '',
-          groupCode: variantType === 'multi' ? `GROUP-${Date.now()}` : undefined,
+          groupCode: variantType === 'multi' 
+            ? (editId && editProducts.length > 0 ? (editProducts[0] as any).groupCode : (row.groupCode || `GROUP-${Date.now()}`))
+            : undefined,
           sequence: row.sequence || null,
           countryDeliverables,
           // Additional fields that need to be stored - convert empty strings to null
@@ -208,9 +352,74 @@ const ProductVariantForm: React.FC = () => {
         };
       });
 
-      // NOTE: Products are created in ExcelLikeProductForm.handleDirectSubmit
-      // This function should only handle navigation, not create products again
-      // to avoid duplicate product creation
+      // Update or create products
+      if (editId) {
+        // Update existing products
+        if (variantType === 'single' && editProduct?._id) {
+          // Single variant update - map to seller update format
+          const productData = productsToCreate[0];
+          await ProductService.update({
+            id: editProduct._id,
+            skuFamilyId: productData.skuFamilyId,
+            specification: productData.specification || '',
+            simType: productData.simType || '',
+            color: productData.color || null,
+            ram: productData.ram || '',
+            storage: productData.storage || '',
+            condition: productData.condition || '',
+            price: productData.price || 0,
+            stock: productData.stock || 0,
+            country: productData.country || null,
+            moq: productData.moq || 1,
+            isNegotiable: productData.isNegotiable || false,
+            isFlashDeal: productData.isFlashDeal === 'true',
+            purchaseType: productData.purchaseType || 'partial',
+            expiryTime: productData.expiryTime || undefined,
+          });
+          toastHelper.showTost('Product updated successfully!', 'success');
+        } else if (variantType === 'multi' && editProducts.length > 0) {
+          // Multi variant update - update all products in the group
+          const updatePromises = editProducts.map((editProd, index) => {
+            if (editProd._id && productsToCreate[index]) {
+              const productData = productsToCreate[index];
+              return ProductService.update({
+                id: editProd._id,
+                skuFamilyId: productData.skuFamilyId,
+                specification: productData.specification || '',
+                simType: productData.simType || '',
+                color: productData.color || null,
+                ram: productData.ram || '',
+                storage: productData.storage || '',
+                condition: productData.condition || '',
+                price: productData.price || 0,
+                stock: productData.stock || 0,
+                country: productData.country || null,
+                moq: productData.moq || 1,
+                isNegotiable: productData.isNegotiable || false,
+                isFlashDeal: productData.isFlashDeal === 'true',
+                purchaseType: productData.purchaseType || 'partial',
+                expiryTime: productData.expiryTime || undefined,
+              });
+            }
+            return Promise.resolve();
+          });
+          await Promise.all(updatePromises);
+          toastHelper.showTost('Products updated successfully!', 'success');
+        }
+        
+        // Navigate back to products list after successful update
+        setTimeout(() => {
+          navigate('/products');
+        }, 1000);
+      } else {
+        // NOTE: Products are created in ExcelLikeProductForm.handleDirectSubmit
+        // This function should only handle navigation, not create products again
+        // to avoid duplicate product creation
+        
+        // Navigate to products list
+        // Products are already created by ExcelLikeProductForm, so we just navigate
+        navigate('/products');
+      }
       
       // Clear localStorage on successful save
       try {
@@ -218,10 +427,6 @@ const ProductVariantForm: React.FC = () => {
       } catch (error) {
         console.error('Error clearing localStorage:', error);
       }
-      
-      // Navigate to products list
-      // Products are already created by ExcelLikeProductForm, so we just navigate
-      navigate('/products');
     } catch (error: any) {
       console.error('Error creating product requests:', error);
       toastHelper.showTost(error.message || 'Failed to create product requests', 'error');
@@ -447,11 +652,13 @@ const ProductVariantForm: React.FC = () => {
             </div>
           </div>
           <div className="flex-1 overflow-hidden">
-            {loading ? (
+            {loading || loadingProduct || (editId && !variantType) ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                  <p className="text-gray-600 dark:text-gray-400">Creating product requests...</p>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {loadingProduct ? 'Loading product...' : 'Creating product requests...'}
+                  </p>
                 </div>
               </div>
             ) : (
@@ -460,6 +667,7 @@ const ProductVariantForm: React.FC = () => {
                 variants={selectedVariants}
                 onSave={handleFormSave}
                 onCancel={handleCancel}
+                editProducts={editProducts}
               />
             )}
           </div>
