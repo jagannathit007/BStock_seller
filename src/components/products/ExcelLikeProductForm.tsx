@@ -51,7 +51,6 @@ export interface ProductRowData {
   tags: string; // Comma-separated string of tag codes
   flashDeal: string;
   shippingTime: string;
-  deliveryTime: string;
   vendor: string;
   vendorListingNo: string;
   carrier: string;
@@ -276,7 +275,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           tags: (product as any).tags || '',
           flashDeal: (product as any).isFlashDeal === 'true' || (product as any).isFlashDeal === true ? '1' : '0',
           shippingTime: (product as any).shippingTime || '',
-          deliveryTime: (product as any).deliveryTime || '',
           vendor: (product as any).vendor || '',
           vendorListingNo: (product as any).vendorListingNo || '',
           carrier: (product as any).carrier || '',
@@ -555,7 +553,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     tags: '',
     flashDeal: '',
     shippingTime: '',
-    deliveryTime: '',
     vendor: '',
     vendorListingNo: '',
     carrier: '',
@@ -1168,7 +1165,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
           paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
           shippingTime: hasPermission('shippingTime') ? (cleanString(row.shippingTime) || '') : '',
-          deliveryTime: hasPermission('deliveryTime') ? (cleanString(row.deliveryTime) || '') : '',
           vendor: hasPermission('vendor') ? (cleanString(row.vendor) || null) : null,
           vendorListingNo: hasPermission('vendorListingNo') ? (cleanString(row.vendorListingNo) || '') : '',
           carrier: hasPermission('carrier') ? (cleanString(row.carrier) || null) : null,
@@ -1252,7 +1248,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     { key: 'negotiableFixed', label: 'NEGOTIABLE/FIXED', width: 150, group: 'Other Info', permissionField: 'negotiableFixed' },
     { key: 'flashDeal', label: 'FLASH DEAL', width: 130, group: 'Other Info', permissionField: 'flashDeal' },
     { key: 'shippingTime', label: 'SHIPPING TIME', width: 130, group: 'Other Info', permissionField: 'shippingTime' },
-    { key: 'deliveryTime', label: 'DELIVERY TIME', width: 130, group: 'Other Info', permissionField: 'deliveryTime' },
     { key: 'vendor', label: 'VENDOR', width: 100, group: 'Other Info', permissionField: 'vendor' },
     { key: 'vendorListingNo', label: 'VENDOR LISTING NO', width: 150, group: 'Other Info', permissionField: 'vendorListingNo' },
     { key: 'carrier', label: 'CARRIER', width: 100, group: 'Other Info', permissionField: 'carrier' },

@@ -87,7 +87,6 @@ export class SellerProductPermissionService {
       { fieldName: 'tags', label: 'Tags', hasPermission: false, isRequired: false, group: 'otherInfo' },
       { fieldName: 'flashDeal', label: 'Flash Deal', hasPermission: false, isRequired: false, group: 'otherInfo' },
       { fieldName: 'shippingTime', label: 'Shipping Time', hasPermission: false, isRequired: false, group: 'otherInfo' },
-      { fieldName: 'deliveryTime', label: 'Delivery Time', hasPermission: false, isRequired: false, group: 'otherInfo' },
       { fieldName: 'vendor', label: 'Vendor', hasPermission: false, isRequired: false, group: 'otherInfo' },
       { fieldName: 'vendorListingNo', label: 'Vendor Listing No', hasPermission: false, isRequired: false, group: 'otherInfo' },
       { fieldName: 'carrier', label: 'Carrier', hasPermission: false, isRequired: false, group: 'otherInfo' },

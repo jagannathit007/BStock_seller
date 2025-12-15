@@ -337,7 +337,6 @@ const ProductVariantForm: React.FC = () => {
           paymentTerm: cleanString(row.paymentTerm) || null,
           paymentMethod: cleanString(row.paymentMethod) || null,
           shippingTime: cleanString(row.shippingTime) || '',
-          deliveryTime: cleanString(row.deliveryTime) || '',
           vendor: cleanString(row.vendor) || null,
           vendorListingNo: cleanString(row.vendorListingNo) || '',
           carrier: cleanString(row.carrier) || null,
