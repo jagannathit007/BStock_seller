@@ -327,13 +327,13 @@ const ProductsTable: React.FC = () => {
               </select>
               <i className="fas fa-chevron-down absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none text-xs"></i>
             </div>
-            <button
+            {/* <button
               className="inline-flex items-center gap-2 rounded-lg bg-[#0071E0] text-white px-4 py-2 text-sm font-medium hover:bg-blue-600 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
               onClick={() => setIsUploadModalOpen(true)}
             >
               <i className="fas fa-upload text-xs"></i>
               Upload File
-            </button>
+            </button> */}
             <button
               className="inline-flex items-center gap-2 rounded-lg bg-[#0071E0] text-white px-4 py-2 text-sm font-medium hover:bg-blue-600 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
               onClick={() => setShowVariantSelectionModal(true)}
