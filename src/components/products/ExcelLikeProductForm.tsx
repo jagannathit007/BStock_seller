@@ -103,11 +103,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
   const [rowSkuFamilySearch, setRowSkuFamilySearch] = useState<{ rowIndex: number; query: string; showResults: boolean } | null>(null);
   const [rowSkuFamilySearchResults, setRowSkuFamilySearchResults] = useState<any[]>([]);
   const [shippingTimeMode, setShippingTimeMode] = useState<Record<number, 'today' | 'tomorrow' | 'calendar' | ''>>({});
-  const totalMoqCellRef = useRef<HTMLDivElement | null>(null);
   const rowsContainerRef = useRef<HTMLDivElement | null>(null);
-  const totalMoqPlaceholderRef = useRef<HTMLDivElement | null>(null);
-  const [totalMoqHeight, setTotalMoqHeight] = useState<number>(0);
-  const [totalMoqLeft, setTotalMoqLeft] = useState<number>(0);
   const [currentCustomerListingNumber, setCurrentCustomerListingNumber] = useState<number | null>(null);
   const [currentUniqueListingNumber, setCurrentUniqueListingNumber] = useState<number | null>(null);
   const [supplierListingNumberInfo, setSupplierListingNumberInfo] = useState<{ listingNumber: number; supplierCode: string } | null>(null);
@@ -484,57 +480,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     }
   }, [rows.map(r => r.shippingTime).join(',')]);
 
-  useEffect(() => {
-    if (variantType === 'multi' && rows.length > 0) {
-      const updatePosition = () => {
-        if (rowsContainerRef.current) {
-          // Get the actual height of the rows container
-          const containerHeight = rowsContainerRef.current.scrollHeight;
-          setTotalMoqHeight(containerHeight);
-        } else {
-          // Fallback: calculate approximate height (40px per row + borders)
-          const approximateHeight = rows.length * 40;
-          setTotalMoqHeight(approximateHeight);
-        }
-        
-        // Measure the actual left position from the placeholder
-        if (totalMoqPlaceholderRef.current && rowsContainerRef.current) {
-          const placeholderRect = totalMoqPlaceholderRef.current.getBoundingClientRect();
-          const containerRect = rowsContainerRef.current.getBoundingClientRect();
-          const leftPosition = placeholderRect.left - containerRect.left;
-          setTotalMoqLeft(leftPosition);
-        }
-      };
-      
-      // Use ResizeObserver for accurate tracking
-      if (rowsContainerRef.current) {
-        const resizeObserver = new ResizeObserver(() => {
-          updatePosition();
-        });
-        resizeObserver.observe(rowsContainerRef.current);
-        
-        // Initial update
-        updatePosition();
-        
-        // Also update after a short delay to ensure DOM is ready
-        const timeoutId = setTimeout(updatePosition, 100);
-        const timeoutId2 = setTimeout(updatePosition, 300);
-        
-        return () => {
-          resizeObserver.disconnect();
-          clearTimeout(timeoutId);
-          clearTimeout(timeoutId2);
-        };
-      } else {
-        // Fallback calculation
-        const approximateHeight = rows.length * 40;
-        setTotalMoqHeight(approximateHeight);
-      }
-    } else {
-      setTotalMoqHeight(0);
-      setTotalMoqLeft(0);
-    }
-  }, [rows.length, variantType, rows]);
 
   // Save data to localStorage whenever rows, totalMoq, or customColumns change
   useEffect(() => {
@@ -619,13 +564,13 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         try {
           const sellerPermissions = await SellerProductPermissionService.getCurrentSellerPermissions();
           setPermissions(sellerPermissions);
-          // If no permissions returned, use empty array (strict mode - only show first 6 fields)
+          // If no permissions returned, use empty array (strict mode - no fields visible)
           if (!sellerPermissions || sellerPermissions.length === 0) {
-            console.warn('No seller permissions found. Only first 6 system fields will be visible.');
+            console.warn('No seller permissions found. No fields will be visible.');
             setPermissions([]);
           }
         } catch (error: any) {
-          console.warn('Error loading seller permissions. Only first 6 system fields will be visible.');
+          console.warn('Error loading seller permissions. No fields will be visible.');
           // Don't set all fields to true - use empty array for strict mode
           setPermissions([]);
         }
@@ -698,24 +643,8 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
 
   // Helper function to check if field has permission
   const hasPermission = (fieldName: string): boolean => {
-    // First 6 system fields that should always be visible (without permission check)
-    // These are critical fields needed for product creation
-    const alwaysVisibleFields = [
-      'supplierId',           // 1. SUPPLIER ID
-      'supplierListingNumber', // 2. SUPPLIER LISTING NO
-      'customerListingNumber', // 3. CUSTOMER LISTING NO
-      'skuFamilyId',          // 4. SKU Family
-      'subModelName',         // 5. SubModelName
-      'storage'               // 6. Storage
-    ];
-    
-    // Always show first 6 fields without permission check
-    if (alwaysVisibleFields.includes(fieldName)) {
-      return true;
-    }
-    
-    // For all other fields, check permissions
-    // If no permissions loaded, don't show the field (strict mode)
+    // Strict mode: Only show fields with explicit permission
+    // If no permissions loaded, don't show any field (strict mode)
     if (permissions.length === 0) {
       return false;
     }
@@ -1092,18 +1021,18 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
 
     if (errors.length > 0) {
       // Use a better error display
-      const errorMessage = `Please fix the following ${errors.length} error(s):\n\n${errors.slice(0, 10).join('\n')}${errors.length > 10 ? `\n\n... and ${errors.length - 10} more errors` : ''}`;
-      if (window.confirm(errorMessage + '\n\nDo you want to continue anyway?')) {
-        // User wants to continue despite errors
-      } else {
-        return;
-      }
+      // const errorMessage = `Please fix the following ${errors.length} error(s):\n\n${errors.slice(0, 10).join('\n')}${errors.length > 10 ? `\n\n... and ${errors.length - 10} more errors` : ''}`;
+      // if (window.confirm(errorMessage + '\n\nDo you want to continue anyway?')) {
+      //   // User wants to continue despite errors
+      // } else {
+      //   return;
+      // }
     }
 
     const rowsWithListingNos = updatedRows;
     
-    // Validate MOQ PER CART for multi-variant products
-    if (variantType === 'multi') {
+    // Validate MOQ PER CART for multi-variant products (only if permission exists)
+    if (variantType === 'multi' && hasPermission('totalMoq')) {
       const totalMoqValue = typeof totalMoq === 'string' ? totalMoq.trim() : totalMoq;
       if (!totalMoqValue || totalMoqValue === '' || totalMoqValue === '0' || Number(totalMoqValue) <= 0) {
         toastHelper.showTost('MOQ PER CART is required for multi-variant products', 'error');
@@ -1114,12 +1043,12 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     // If editing, bypass margin/cost flow and directly save
     if (editProducts && editProducts.length > 0) {
       // Direct save for edit mode - preserve existing margins and costs
-      onSave(rowsWithListingNos, variantType === 'multi' ? totalMoq : undefined);
+      onSave(rowsWithListingNos, variantType === 'multi' && hasPermission('totalMoq') ? totalMoq : undefined);
       return;
     }
     
     // For sellers, directly create product requests (no margin/cost modals)
-    await handleDirectSubmit(rowsWithListingNos, variantType === 'multi' ? totalMoq : undefined);
+    await handleDirectSubmit(rowsWithListingNos, variantType === 'multi' && hasPermission('totalMoq') ? totalMoq : undefined);
   };
 
   // Direct submit for sellers (no margin/cost selection)
@@ -1195,64 +1124,309 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           }
         }
 
-        return {
-          skuFamilyId: row.skuFamilyId,
-          gradeId: (row.grade && /^[0-9a-fA-F]{24}$/.test(row.grade)) ? row.grade : null,
-          specification: cleanString(row.subModelName) || cleanString(row.version) || cleanString((row as any).specification) || '',
-          simType: row.sim || '',
-          color: normalizeColor(row.colour) || null,
-          ram: cleanString(row.ram) || '',
-          storage: row.storage || '',
-          weight: row.weight ? parseFloat(String(row.weight)) : null,
-          condition: cleanString(row.condition) || null,
-          stock: parseFloat(String(row.totalQty)) || 0,
-          country: normalizeCountry(cleanString(row.country)) || null,
-          moq: parseFloat(String(row.moqPerVariant)) || 1,
-          purchaseType: hasPermission('purchaseType') ? ((row.purchaseType === 'full' || row.purchaseType === 'partial') ? row.purchaseType : 'partial') : 'partial',
-          // Collect custom fields
-          customFields: (() => {
-            const customFieldsMap: Record<string, string> = {};
-            customColumns.forEach(customCol => {
-              const value = row[customCol.key as keyof ProductRowData];
-              if (value && typeof value === 'string' && value.trim()) {
-                customFieldsMap[customCol.key] = value.trim();
-              }
-            });
-            return Object.keys(customFieldsMap).length > 0 ? customFieldsMap : undefined;
-          })(),
-          isNegotiable: row.negotiableFixed === '1',
-          isFlashDeal: row.flashDeal && (row.flashDeal === '1' || row.flashDeal === 'true' || row.flashDeal.toLowerCase() === 'yes') ? 'true' : 'false',
-          startTime: cleanString(row.startTime) ? new Date(row.startTime).toISOString() : '',
-          expiryTime: cleanString(row.endTime) ? new Date(row.endTime).toISOString() : '',
-          groupCode: variantType === 'multi' ? `GROUP-${Date.now()}` : undefined,
-          sequence: row.sequence || null,
-          countryDeliverables,
-          sellerId: hasPermission('supplierId') ? (cleanString(row.supplierId) || getCurrentSellerId()) : getCurrentSellerId(), // Always include sellerId
-          supplierListingNumber: hasPermission('supplierListingNumber') ? (cleanString(row.supplierListingNumber) || '') : '',
-          customerListingNumber: hasPermission('customerListingNumber') ? (cleanString(row.customerListingNumber) || '') : '',
-          packing: hasPermission('packing') ? (cleanString(row.packing) || '') : '',
-          currentLocation: hasPermission('currentLocation') ? (cleanString(row.currentLocation) || '') : '',
-          deliveryLocation: hasPermission('deliveryLocation') && Array.isArray(row.deliveryLocation) ? row.deliveryLocation : [],
-          customMessage: hasPermission('customMessage') ? (cleanString(row.customMessage) || '') : '',
-          totalMoq: variantType === 'multi' && totalMoqValue ? parseFloat(String(totalMoqValue)) : null,
-          paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
-          paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
-          shippingTime: hasPermission('shippingTime') ? (cleanString(row.shippingTime) || '') : '',
-          vendor: hasPermission('vendor') ? (cleanString(row.vendor) || null) : null,
-          vendorListingNo: hasPermission('vendorListingNo') ? (cleanString(row.vendorListingNo) || '') : '',
-          carrier: hasPermission('carrier') ? (cleanString(row.carrier) || null) : null,
-          carrierListingNo: hasPermission('carrierListingNo') ? (cleanString(row.carrierListingNo) || '') : '',
-          uniqueListingNo: hasPermission('uniqueListingNo') ? (cleanString(row.uniqueListingNo) || '') : '',
-          tags: hasPermission('tags') ? (cleanString(row.tags) || '') : '',
-          remark: hasPermission('remark') ? (cleanString(row.remark) || '') : '',
-          warranty: hasPermission('warranty') ? (cleanString(row.warranty) || '') : '',
-          batteryHealth: hasPermission('batteryHealth') ? (cleanString(row.batteryHealth) || '') : '',
-          lockUnlock: row.lockUnlock === '1',
-        };
+        // Build product object - only include fields with permission
+        const product: any = {};
+        
+        // Backend-required fields - always include, but use permission-based values or defaults
+        // skuFamilyId is required by backend
+        if (hasPermission('skuFamilyId') && row.skuFamilyId && /^[0-9a-fA-F]{24}$/.test(row.skuFamilyId)) {
+          product.skuFamilyId = row.skuFamilyId;
+        } else if (!hasPermission('skuFamilyId')) {
+          // If no permission, skip this product (can't create without skuFamilyId)
+          // Or provide a default - but this should be handled by validation
+          // For now, we'll skip products without skuFamilyId permission
+          return null;
+        }
+        
+        // stock is required by backend
+        if (hasPermission('totalQty')) {
+          product.stock = parseFloat(String(row.totalQty)) || 0;
+        } else {
+          // If no permission, use default value 0
+          product.stock = 0;
+        }
+        
+        // Only include gradeId if permission exists and value is valid
+        if (hasPermission('grade') && row.grade && /^[0-9a-fA-F]{24}$/.test(row.grade)) {
+          product.gradeId = row.grade;
+        }
+        
+        // Only include specification if permission exists
+        if (hasPermission('subModelName') || hasPermission('version')) {
+          const spec = cleanString(row.subModelName) || cleanString(row.version) || cleanString((row as any).specification);
+          if (spec) {
+            product.specification = spec;
+          }
+        }
+        
+        // Only include simType if permission exists
+        if (hasPermission('sim') && row.sim) {
+          product.simType = row.sim;
+        }
+        
+        // Only include color if permission exists
+        if (hasPermission('colour')) {
+          const color = normalizeColor(row.colour);
+          if (color) {
+            product.color = color;
+          }
+        }
+        
+        // Only include storage if permission exists
+        if (hasPermission('storage') && row.storage) {
+          product.storage = row.storage;
+        }
+        
+        // Only include weight if permission exists
+        if (hasPermission('weight') && row.weight) {
+          product.weight = parseFloat(String(row.weight));
+        }
+        
+        // Only include condition if permission exists
+        if (hasPermission('condition')) {
+          const condition = cleanString(row.condition);
+          if (condition) {
+            product.condition = condition;
+          }
+        }
+        
+        // Only include country if permission exists
+        if (hasPermission('country')) {
+          const country = normalizeCountry(cleanString(row.country));
+          if (country) {
+            product.country = country;
+          }
+        }
+        
+        // Only include moq if permission exists
+        if (hasPermission('moqPerVariant')) {
+          product.moq = parseFloat(String(row.moqPerVariant)) || 1;
+        } else {
+          // Default moq value
+          product.moq = 1;
+        }
+        
+        // Only include purchaseType if permission exists
+        if (hasPermission('purchaseType')) {
+          product.purchaseType = (row.purchaseType === 'full' || row.purchaseType === 'partial') ? row.purchaseType : 'partial';
+        } else {
+          product.purchaseType = 'partial'; // Default value
+        }
+        // Collect custom fields
+        const customFieldsMap: Record<string, string> = {};
+        customColumns.forEach(customCol => {
+          const value = row[customCol.key as keyof ProductRowData];
+          if (value && typeof value === 'string' && value.trim()) {
+            customFieldsMap[customCol.key] = value.trim();
+          }
+        });
+        if (Object.keys(customFieldsMap).length > 0) {
+          product.customFields = customFieldsMap;
+        }
+        
+        // Only include isNegotiable if permission exists
+        if (hasPermission('negotiableFixed')) {
+          product.isNegotiable = row.negotiableFixed === '1';
+        }
+        
+        // Only include isFlashDeal if permission exists
+        if (hasPermission('flashDeal')) {
+          product.isFlashDeal = row.flashDeal && (row.flashDeal === '1' || row.flashDeal === 'true' || row.flashDeal.toLowerCase() === 'yes') ? 'true' : 'false';
+        }
+        
+        // Only include startTime if permission exists
+        if (hasPermission('startTime') && cleanString(row.startTime)) {
+          product.startTime = new Date(row.startTime).toISOString();
+        }
+        
+        // Only include expiryTime if permission exists
+        if (hasPermission('endTime') && cleanString(row.endTime)) {
+          product.expiryTime = new Date(row.endTime).toISOString();
+        }
+        
+        // Group code for multi-variant
+        if (variantType === 'multi') {
+          product.groupCode = `GROUP-${Date.now()}`;
+        }
+        
+        // Sequence
+        if (row.sequence) {
+          product.sequence = row.sequence;
+        }
+        
+        // Country deliverables
+        if (countryDeliverables.length > 0) {
+          product.countryDeliverables = countryDeliverables;
+        }
+        
+        // Always include sellerId
+        product.sellerId = hasPermission('supplierId') ? (cleanString(row.supplierId) || getCurrentSellerId()) : getCurrentSellerId();
+        
+        // Only include supplierListingNumber if permission exists and value is provided
+        if (hasPermission('supplierListingNumber')) {
+          const supplierListingNo = cleanString(row.supplierListingNumber);
+          if (supplierListingNo) {
+            product.supplierListingNumber = supplierListingNo;
+          }
+        }
+        
+        // Only include customerListingNumber if permission exists and value is provided
+        if (hasPermission('customerListingNumber')) {
+          const customerListingNo = cleanString(row.customerListingNumber);
+          if (customerListingNo) {
+            product.customerListingNumber = customerListingNo;
+          }
+        }
+        
+        // Only include packing if permission exists and value is provided
+        if (hasPermission('packing')) {
+          const packingValue = cleanString(row.packing);
+          if (packingValue) {
+            product.packing = packingValue;
+          }
+        }
+        
+        // Only include currentLocation if permission exists and value is provided
+        if (hasPermission('currentLocation')) {
+          const currentLoc = cleanString(row.currentLocation);
+          if (currentLoc) {
+            product.currentLocation = currentLoc;
+          }
+        }
+        
+        // Only include deliveryLocation if permission exists
+        if (hasPermission('deliveryLocation') && Array.isArray(row.deliveryLocation) && row.deliveryLocation.length > 0) {
+          product.deliveryLocation = row.deliveryLocation;
+        }
+        
+        // Only include customMessage if permission exists and value is provided
+        if (hasPermission('customMessage')) {
+          const customMsg = cleanString(row.customMessage);
+          if (customMsg) {
+            product.customMessage = customMsg;
+          }
+        }
+        
+        // Only include totalMoq if permission exists
+        if (variantType === 'multi' && hasPermission('totalMoq') && totalMoqValue) {
+          product.totalMoq = parseFloat(String(totalMoqValue));
+        }
+        
+        // Only include paymentTerm if permission exists and value is provided
+        if (hasPermission('paymentTerm')) {
+          const paymentTermValue = cleanString(row.paymentTerm);
+          if (paymentTermValue) {
+            product.paymentTerm = paymentTermValue;
+          }
+        }
+        
+        // Only include paymentMethod if permission exists and value is provided
+        if (hasPermission('paymentMethod')) {
+          const paymentMethodValue = cleanString(row.paymentMethod);
+          if (paymentMethodValue) {
+            product.paymentMethod = paymentMethodValue;
+          }
+        }
+        
+        // Only include shippingTime if permission exists and value is provided
+        if (hasPermission('shippingTime')) {
+          const shippingTimeValue = cleanString(row.shippingTime);
+          if (shippingTimeValue) {
+            product.shippingTime = shippingTimeValue;
+          }
+        }
+        
+        // Only include vendor if permission exists and value is provided
+        if (hasPermission('vendor')) {
+          const vendorValue = cleanString(row.vendor);
+          if (vendorValue) {
+            product.vendor = vendorValue;
+          }
+        }
+        
+        // Only include vendorListingNo if permission exists and value is provided
+        if (hasPermission('vendorListingNo')) {
+          const vendorListingNoValue = cleanString(row.vendorListingNo);
+          if (vendorListingNoValue) {
+            product.vendorListingNo = vendorListingNoValue;
+          }
+        }
+        
+        // Only include carrier if permission exists and value is provided
+        if (hasPermission('carrier')) {
+          const carrierValue = cleanString(row.carrier);
+          if (carrierValue) {
+            product.carrier = carrierValue;
+          }
+        }
+        
+        // Only include carrierListingNo if permission exists and value is provided
+        if (hasPermission('carrierListingNo')) {
+          const carrierListingNoValue = cleanString(row.carrierListingNo);
+          if (carrierListingNoValue) {
+            product.carrierListingNo = carrierListingNoValue;
+          }
+        }
+        
+        // Only include uniqueListingNo if permission exists and value is provided
+        if (hasPermission('uniqueListingNo')) {
+          const uniqueListingNoValue = cleanString(row.uniqueListingNo);
+          if (uniqueListingNoValue) {
+            product.uniqueListingNo = uniqueListingNoValue;
+          }
+        }
+        
+        // Only include tags if permission exists and value is provided
+        if (hasPermission('tags')) {
+          const tagsValue = cleanString(row.tags);
+          if (tagsValue) {
+            product.tags = tagsValue;
+          }
+        }
+        
+        // Only include remark if permission exists and value is provided
+        if (hasPermission('remark')) {
+          const remarkValue = cleanString(row.remark);
+          if (remarkValue) {
+            product.remark = remarkValue;
+          }
+        }
+        
+        // Only include warranty if permission exists and value is provided
+        if (hasPermission('warranty')) {
+          const warrantyValue = cleanString(row.warranty);
+          if (warrantyValue) {
+            product.warranty = warrantyValue;
+          }
+        }
+        
+        // Only include batteryHealth if permission exists and value is provided
+        if (hasPermission('batteryHealth')) {
+          const batteryHealthValue = cleanString(row.batteryHealth);
+          if (batteryHealthValue) {
+            product.batteryHealth = batteryHealthValue;
+          }
+        }
+        
+        // Only include lockUnlock if permission exists
+        if (hasPermission('lockUnlock')) {
+          product.lockUnlock = row.lockUnlock === '1';
+        }
+        
+        return product;
       });
 
+      // Filter out null products (products without required fields like skuFamilyId)
+      const validProducts = productsToCreate.filter(product => product !== null);
+      
+      if (validProducts.length === 0) {
+        toastHelper.showTost('No valid products to create. Please ensure SKU Family is selected for at least one product.', 'error');
+        setLoading(false);
+        return;
+      }
+      
       // Create all product requests using seller service
-      const createPromises = productsToCreate.map(product => 
+      const createPromises = validProducts.map(product => 
         ProductService.createSellerProductRequest(product)
       );
 
@@ -1333,34 +1507,14 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     { key: 'remark', label: 'REMARK', width: 150, group: 'Other Info', permissionField: 'remark' },
   ];
 
-  // Filter columns based on permissions
+  // Filter columns based on permissions - strict mode: only show fields with permission
   const columns = allColumns.filter(col => {
     // Always show custom fields (no permission check needed)
     if (col.group === 'Custom Fields') {
       return true;
     }
     
-    // First 6 system fields that should always be visible (without permission check)
-    const alwaysVisibleFields = [
-      'supplierId',
-      'supplierListingNumber',
-      'customerListingNumber',
-      'skuFamilyId',
-      'subModelName',
-      'storage'
-    ];
-    
-    // Always show first 6 fields
-    if (alwaysVisibleFields.includes(col.key)) {
-      return true;
-    }
-    
-    // Always show totalMoq for multi-variant products (required field)
-    if (col.key === 'totalMoq' && variantType === 'multi') {
-      return true;
-    }
-    
-    // For all other fields, check permission
+    // For all fields, check permission
     if (col.permissionField) {
       return hasPermission(col.permissionField);
     }
@@ -1368,6 +1522,9 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     // If no permissionField defined, don't show (strict mode)
     return false;
   });
+
+  // Check if there are any permissioned fields (excluding custom fields)
+  const hasPermissionedFields = columns.some(col => col.group !== 'Custom Fields');
 
   // Get country options from constants (show name, store code)
   const countryOptions = constants?.spec?.COUNTRY || [];
@@ -1940,33 +2097,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           </select>
         );
 
-      case 'totalMoq':
-        // Only render in first row, will span all rows
-        if (rowIndex === 0 && variantType === 'multi') {
-          return (
-            <div className="flex flex-col items-center justify-center w-full h-full py-2">
-              <input
-                type="number"
-                step="0.01"
-                value={totalMoq}
-                onChange={(e) => setTotalMoq(e.target.value)}
-                className="w-full px-2 py-1.5 text-sm border-2 border-purple-300 dark:border-purple-600 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all font-medium text-center"
-                placeholder="0.00"
-                required
-                onFocus={() => {
-                  setFocusedCell({ row: rowIndex, col: column.key });
-                  setSelectedRowIndex(rowIndex);
-                }}
-              />
-              <span className="text-xs text-gray-500 dark:text-gray-400 mt-1 italic">
-                All {rows.length} products
-              </span>
-            </div>
-          );
-        }
-        // Don't render for other rows or single variant
-        return null;
-
       case 'deliveryLocation':
         const deliveryValue = Array.isArray(value) ? value : (value ? [value] : []);
         const deliveryDisplayNames = deliveryValue
@@ -2297,33 +2427,53 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         );
 
       case 'totalMoq':
-        // Simple numeric field for MOQ PER CART.
-        // Editable only in the first (master) row for multi-variant,
-        // read-only for other rows; hidden for single-variant products.
+        // MOQ PER CART field - shows value in each row, editable only in first row
+        // Hidden for single-variant products
         if (variantType !== 'multi') {
           return null;
         }
 
         const isMasterMoqRow = rowIndex === 0;
+        const moqValue = totalMoq || '';
 
         return (
-          <input
-            type="number"
-            step="0.01"
-            value={totalMoq}
-            onChange={(e) => {
-              if (isMasterMoqRow) {
-                setTotalMoq(e.target.value);
-              }
-            }}
-            className="w-full px-2 py-1.5 text-xs border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 text-right font-medium placeholder:text-gray-400"
-            placeholder="0.00"
-            disabled={!isMasterMoqRow}
-            onFocus={() => {
-              setFocusedCell({ row: rowIndex, col: column.key });
-              setSelectedRowIndex(rowIndex);
-            }}
-          />
+          <div className="w-full flex flex-col items-center justify-center gap-1.5">
+            <input
+              type="number"
+              step="0.01"
+              value={moqValue}
+              onChange={(e) => {
+                if (isMasterMoqRow) {
+                  setTotalMoq(e.target.value);
+                }
+              }}
+              className="w-full px-2 py-1.5 text-xs border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 text-center font-medium placeholder:text-gray-400"
+              placeholder="0.00"
+              disabled={!isMasterMoqRow}
+              readOnly={!isMasterMoqRow}
+              onFocus={() => {
+                setFocusedCell({ row: rowIndex, col: column.key });
+                setSelectedRowIndex(rowIndex);
+              }}
+            />
+            {/* Fill button - only show in first row */}
+            {isMasterMoqRow && rows.length > 1 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // For totalMoq, the value is already shared across all rows
+                  // This button is for visual consistency with other columns
+                  toastHelper.showTost('MOQ PER CART value applies to all variants', 'info');
+                }}
+                className="bg-blue-600 text-white text-xs px-2 py-0.5 rounded shadow-md hover:bg-blue-700 z-20 transition-all duration-200 flex items-center gap-1"
+                title="MOQ PER CART applies to all variants"
+              >
+                <i className="fas fa-arrow-down text-xs"></i>
+                <span className="text-xs font-medium">Fill</span>
+              </button>
+            )}
+          </div>
         );
 
       default:
@@ -2421,30 +2571,34 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     <form onSubmit={handleSubmit} className="flex flex-col h-full">
       {/* Enhanced Toolbar */}
       <div className="bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-700 px-6 py-3 flex items-center justify-between sticky top-0 z-20 shadow-md">
-        <div className="flex items-center gap-3 flex-1">
+          <div className="flex items-center gap-3 flex-1">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={addRow}
-              className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
-              title="Add Row (Ctrl+N or Cmd+N)"
-            >
-              <i className="fas fa-plus text-sm"></i>
-              <span>Add Row</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (rows.length > 0) {
-                  duplicateRow(rows.length - 1);
-                }
-              }}
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
-              title="Duplicate Last Row"
-            >
-              <i className="fas fa-copy text-sm"></i>
-              <span>Duplicate</span>
-            </button>
+            {hasPermissionedFields && (
+              <>
+                <button
+                  type="button"
+                  onClick={addRow}
+                  className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+                  title="Add Row (Ctrl+N or Cmd+N)"
+                >
+                  <i className="fas fa-plus text-sm"></i>
+                  <span>Add Row</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (rows.length > 0) {
+                      duplicateRow(rows.length - 1);
+                    }
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+                  title="Duplicate Last Row"
+                >
+                  <i className="fas fa-copy text-sm"></i>
+                  <span>Duplicate</span>
+                </button>
+              </>
+            )}
           </div>
           <div className="h-8 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
           {/* SKU Family Search Field */}
@@ -2587,18 +2741,20 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
             <i className="fas fa-times mr-2"></i>
             Cancel
           </button>
-          <button
-            type="submit"
-            className="px-6 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center gap-2"
-          >
-            <i className={`fas ${editProducts && editProducts.length > 0 ? 'fa-edit' : 'fa-save'} text-sm`}></i>
-            <span>{editProducts && editProducts.length > 0 ? 'Update Product' : 'Save All Products'}</span>
-            {!editProducts || editProducts.length === 0 ? (
-              <span className="ml-1 px-2 py-0.5 bg-blue-500 rounded-full text-xs font-bold">
-                {rows.length}
-              </span>
-            ) : null}
-          </button>
+          {hasPermissionedFields && (
+            <button
+              type="submit"
+              className="px-6 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center gap-2"
+            >
+              <i className={`fas ${editProducts && editProducts.length > 0 ? 'fa-edit' : 'fa-save'} text-sm`}></i>
+              <span>{editProducts && editProducts.length > 0 ? 'Update Product' : 'Save All Products'}</span>
+              {!editProducts || editProducts.length === 0 ? (
+                <span className="ml-1 px-2 py-0.5 bg-blue-500 rounded-full text-xs font-bold">
+                  {rows.length}
+                </span>
+              ) : null}
+            </button>
+          )}
         </div>
       </div>
 
@@ -2729,44 +2885,21 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
                 </div>
               ))}
               {/* Add Column Button */}
-              <div
-                className="px-3 py-3 text-xs font-bold text-gray-800 dark:text-gray-200 border-r border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/30 hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors cursor-pointer flex items-center justify-center"
-                style={{ width: '80px', minWidth: '80px' }}
-                onClick={() => setShowAddColumnModal(true)}
-                title="Add Custom Column"
-              >
-                <i className="fas fa-plus text-green-600 dark:text-green-400 text-lg"></i>
-              </div>
+              {hasPermissionedFields && (
+                <div
+                  className="px-3 py-3 text-xs font-bold text-gray-800 dark:text-gray-200 border-r border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/30 hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors cursor-pointer flex items-center justify-center"
+                  style={{ width: '80px', minWidth: '80px' }}
+                  onClick={() => setShowAddColumnModal(true)}
+                  title="Add Custom Column"
+                >
+                  <i className="fas fa-plus text-green-600 dark:text-green-400 text-lg"></i>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Enhanced Rows */}
           <div ref={rowsContainerRef} className="relative">
-            {variantType === 'multi' && rows.length > 0 && totalMoqLeft > 0 && (() => {
-              const totalMoqCol = columns.find(col => col.key === 'totalMoq');
-              if (!totalMoqCol) return null;
-              
-              return (
-                <div
-                  ref={totalMoqCellRef}
-                  className="px-0 py-1.5 border-r border-purple-300 dark:border-purple-600 bg-purple-50 dark:bg-purple-900/30 absolute"
-                  style={{ 
-                    width: `${totalMoqCol.width}px`, 
-                    minWidth: `${totalMoqCol.width}px`,
-                    left: `${totalMoqLeft}px`,
-                    top: '0',
-                    height: totalMoqHeight > 0 ? `${totalMoqHeight}px` : `${rows.length * 40}px`,
-                    minHeight: totalMoqHeight > 0 ? `${totalMoqHeight}px` : `${rows.length * 40}px`,
-                    zIndex: 10
-                  }}
-                  title={`MOQ PER CART for all ${rows.length} products`}
-                >
-                  <div className="w-full h-full flex flex-col items-center justify-center px-2">
-                    {renderCell(rows[0], 0, totalMoqCol)}
-                  </div>
-                </div>
-              );
-            })()}
             {rows.map((row, rowIndex) => (
               <div
                 key={rowIndex}
@@ -2819,34 +2952,12 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
 
                 {/* Enhanced Cells */}
                 {columns.map((col) => {
-                  // For totalMoq column in multi-variant mode:
-                  // - Render invisible placeholder in all rows to maintain column alignment
-                  // - The actual spanning cell is rendered outside the row loop
-                  // - Use ref on first row's placeholder to measure position
-                  if (col.key === 'totalMoq' && variantType === 'multi') {
-                    return (
-                      <div
-                        key={`${rowIndex}-${col.key}`}
-                        ref={rowIndex === 0 ? totalMoqPlaceholderRef : null}
-                        className="px-0 py-1.5 border-r border-gray-200 dark:border-gray-700"
-                        style={{ 
-                          width: `${col.width}px`, 
-                          minWidth: `${col.width}px`,
-                          visibility: 'hidden',
-                          pointerEvents: 'none'
-                        }}
-                        aria-hidden="true"
-                      />
-                    );
-                  }
-                  
-                  // Regular columns (not totalMoq or totalMoq in single variant)
+                  // Regular columns including totalMoq (now rendered normally in each row)
                   return (
                     <div
                       key={`${rowIndex}-${col.key}`}
                       className={`px-0 py-1.5 border-r border-gray-200 dark:border-gray-700 relative group transition-all duration-150 flex ${
                         focusedCell?.row === rowIndex && focusedCell?.col === col.key
-                          // ? 'ring-2 ring-blue-500 ring-offset-1 z-10 bg-blue-50 dark:bg-blue-900/30 shadow-md'
                           ? ''
                           : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
                       }`}
@@ -2856,40 +2967,49 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
                         justifyContent:'center',
                         alignItems:'center'
                       }}
-                      onDoubleClick={() => fillAllBelow(rowIndex, col.key)}
+                      onDoubleClick={() => {
+                        if (col.key === 'totalMoq' && variantType === 'multi') {
+                          // For totalMoq, fill all below rows with the same value
+                          fillAllBelow(rowIndex, col.key);
+                        } else {
+                          fillAllBelow(rowIndex, col.key);
+                        }
+                      }}
                       title="Double-click to fill all below"
                     >
-                      <div className="px-2">
+                      <div className="px-2 w-full">
                         {renderCell(row, rowIndex, col)}
                       </div>
-                    {rowIndex < rows.length - 1 && focusedCell?.row === rowIndex && focusedCell?.col === col.key && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          fillDown(rowIndex, col.key);
-                        }}
-                        className="absolute bottom-1 right-1 bg-blue-600 text-white text-xs px-2 py-1 rounded-lg shadow-lg hover:bg-blue-700 z-20 transform hover:scale-110 transition-all duration-200 flex items-center gap-1"
-                        title="Fill Down (Ctrl+D)"
-                      >
-                        <i className="fas fa-arrow-down text-xs"></i>
-                        <span className="text-xs font-medium">Fill</span>
-                      </button>
-                    )}
-                    {/* Hover indicator */}
-                    <div className="absolute inset-0 border-2 border-transparent group-hover:border-blue-300 dark:group-hover:border-blue-700 rounded pointer-events-none transition-all duration-150"></div>
-                  </div>
+                      {col.key !== 'totalMoq' && rowIndex < rows.length - 1 && focusedCell?.row === rowIndex && focusedCell?.col === col.key && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            fillDown(rowIndex, col.key);
+                          }}
+                          className="absolute bottom-1 right-1 bg-blue-600 text-white text-xs px-2 py-1 rounded-lg shadow-lg hover:bg-blue-700 z-20 transform hover:scale-110 transition-all duration-200 flex items-center gap-1"
+                          title="Fill Down (Ctrl+D)"
+                        >
+                          <i className="fas fa-arrow-down text-xs"></i>
+                          <span className="text-xs font-medium">Fill</span>
+                        </button>
+                      )}
+                      {/* Hover indicator */}
+                      <div className="absolute inset-0 border-2 border-transparent group-hover:border-blue-300 dark:group-hover:border-blue-700 rounded pointer-events-none transition-all duration-150"></div>
+                    </div>
                   );
                 })}
                 {/* Add Column Button Cell */}
-                <div
-                  className="px-2 py-1.5 border-r border-gray-200 dark:border-gray-700 flex items-center justify-center bg-green-50 dark:bg-green-900/30 hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors cursor-pointer"
-                  style={{ width: '80px', minWidth: '80px' }}
-                  onClick={() => setShowAddColumnModal(true)}
-                  title="Add Custom Column"
-                >
-                  <i className="fas fa-plus text-green-600 dark:text-green-400"></i>
-                </div>
+                {hasPermissionedFields && (
+                  <div
+                    className="px-2 py-1.5 border-r border-gray-200 dark:border-gray-700 flex items-center justify-center bg-green-50 dark:bg-green-900/30 hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors cursor-pointer"
+                    style={{ width: '80px', minWidth: '80px' }}
+                    onClick={() => setShowAddColumnModal(true)}
+                    title="Add Custom Column"
+                  >
+                    <i className="fas fa-plus text-green-600 dark:text-green-400"></i>
+                  </div>
+                )}
               </div>
             ))}
           </div>
