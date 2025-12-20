@@ -12,7 +12,7 @@ interface Product {
   ram: string | string[];
   storage: string | string[];
   condition: string;
-  price: number;
+  price?: number;
   stock: number;
   country: string;
   moq: number;

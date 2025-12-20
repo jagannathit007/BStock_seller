@@ -11,6 +11,11 @@ import { SellerProductPermissionService, SellerProductFieldPermission } from '..
 import { STORAGE_KEYS, StorageService } from '../../constants/storage';
 import toastHelper from '../../utils/toastHelper';
 
+type ColumnDefinition = 
+  | { key: string; label: string; width: number }
+  | { key: string; label: string; width: number; group: string; permissionField: string; subgroup?: undefined }
+  | { key: string; label: string; width: number; group: string; subgroup: string; permissionField: string };
+
 export interface ProductRowData {
   // Product Detail Group
   subModelName: string;
@@ -121,8 +126,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
   };
 
   // Removed modal states - sellers don't set margins/costs
-  const [pendingRows, setPendingRows] = useState<ProductRowData[]>([]);
-  const [pendingTotalMoq, setPendingTotalMoq] = useState<number | string | undefined>(undefined);
 
   // Dynamic custom columns state
   const [customColumns, setCustomColumns] = useState<Array<{ key: string; label: string; width: number }>>([]);
@@ -151,16 +154,16 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     if (editProducts && editProducts.length > 0) {
       console.log('ExcelLikeProductForm: Initializing rows from editProducts:', editProducts.length, 'products');
       console.log('ExcelLikeProductForm: editProducts data:', JSON.stringify(editProducts, null, 2));
-      const transformedRows: ProductRowData[] = editProducts.map((product, index) => {
+      const transformedRows: ProductRowData[] = editProducts.map((product) => {
         const skuFamily = typeof product.skuFamilyId === 'object' ? product.skuFamilyId : null;
         const grade = (product as any).gradeId ? (typeof (product as any).gradeId === 'object' ? (product as any).gradeId._id : (product as any).gradeId) : '';
         
         // Get country deliverables
         const hkDeliverable = Array.isArray(product.countryDeliverables) 
-          ? product.countryDeliverables.find(cd => cd.country === 'Hongkong')
+          ? product.countryDeliverables.find((cd: any) => cd.country === 'Hongkong')
           : null;
         const dubaiDeliverable = Array.isArray(product.countryDeliverables)
-          ? product.countryDeliverables.find(cd => cd.country === 'Dubai')
+          ? product.countryDeliverables.find((cd: any) => cd.country === 'Dubai')
           : null;
         
         // Get custom fields
@@ -1508,15 +1511,24 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
   ];
 
   // Filter columns based on permissions - strict mode: only show fields with permission
-  const columns = allColumns.filter(col => {
+  const columns = allColumns.filter((col): col is ColumnDefinition => {
     // Always show custom fields (no permission check needed)
-    if (col.group === 'Custom Fields') {
+    // Custom columns don't have group/permissionField, so check if it's in customColumns array
+    if (!('group' in col) && !('permissionField' in col)) {
+      return true; // This is a custom column, always show
+    }
+    
+    if ('group' in col && col.group === 'Custom Fields') {
       return true;
     }
     
     // For all fields, check permission
-    if (col.permissionField) {
-      return hasPermission(col.permissionField);
+    // Type guard: check if col has permissionField property and it's a string
+    if ('permissionField' in col) {
+      const permissionFieldValue = (col as Extract<ColumnDefinition, { permissionField: string }>).permissionField;
+      if (permissionFieldValue) {
+        return hasPermission(permissionFieldValue);
+      }
     }
     
     // If no permissionField defined, don't show (strict mode)
@@ -1524,7 +1536,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
   });
 
   // Check if there are any permissioned fields (excluding custom fields)
-  const hasPermissionedFields = columns.some(col => col.group !== 'Custom Fields');
+  const hasPermissionedFields = columns.some(col => 'group' in col && col.group !== 'Custom Fields');
 
   // Get country options from constants (show name, store code)
   const countryOptions = constants?.spec?.COUNTRY || [];
@@ -2774,10 +2786,10 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
             <div className="flex border-b border-gray-300 dark:border-gray-600">
               <div className="min-w-12 border-r-2 border-gray-400 dark:border-gray-600 bg-gray-300 dark:bg-gray-800 sticky left-0 z-10"></div>
               {columns.map((col) => {
-                const hkCols = columns.filter(c => c.subgroup === 'HK');
-                const dubaiCols = columns.filter(c => c.subgroup === 'DUBAI');
-                const paymentTermCols = columns.filter(c => c.subgroup === 'PAYMENT_TERM');
-                const paymentMethodCols = columns.filter(c => c.subgroup === 'PAYMENT_METHOD');
+                const hkCols = columns.filter((c): c is Extract<ColumnDefinition, { subgroup: string }> => 'subgroup' in c && c.subgroup === 'HK');
+                const dubaiCols = columns.filter((c): c is Extract<ColumnDefinition, { subgroup: string }> => 'subgroup' in c && c.subgroup === 'DUBAI');
+                const paymentTermCols = columns.filter((c): c is Extract<ColumnDefinition, { subgroup: string }> => 'subgroup' in c && c.subgroup === 'PAYMENT_TERM');
+                const paymentMethodCols = columns.filter((c): c is Extract<ColumnDefinition, { subgroup: string }> => 'subgroup' in c && c.subgroup === 'PAYMENT_METHOD');
                 const hkWidth = hkCols.reduce((sum, c) => sum + c.width, 0);
                 const dubaiWidth = dubaiCols.reduce((sum, c) => sum + c.width, 0);
                 const paymentTermWidth = paymentTermCols.reduce((sum, c) => sum + c.width, 0);
@@ -2836,7 +2848,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
                       </div>
                     </div>
                   );
-                } else if (col.subgroup) {
+                } else if ('subgroup' in col && col.subgroup) {
                   // Skip rendering for other columns in the group (they're covered by the group header)
                   return null;
                 } else {
@@ -2861,15 +2873,15 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
                 <div
                   key={col.key}
                   className={`px-3 py-3 text-xs font-bold text-gray-800 dark:text-gray-200 border-r border-gray-300 dark:border-gray-600 whitespace-nowrap hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors cursor-default ${
-                    col.group === 'Custom Fields'
+                    ('group' in col && col.group === 'Custom Fields')
                       ? 'bg-yellow-50 dark:bg-yellow-900/30'
-                      : col.subgroup === 'HK' 
+                      : ('subgroup' in col && col.subgroup === 'HK')
                       ? 'bg-blue-50 dark:bg-blue-900/30' 
-                      : col.subgroup === 'DUBAI' 
+                      : ('subgroup' in col && col.subgroup === 'DUBAI')
                       ? 'bg-green-50 dark:bg-green-900/30'
-                      : col.subgroup === 'PAYMENT_TERM'
+                      : ('subgroup' in col && col.subgroup === 'PAYMENT_TERM')
                       ? 'bg-purple-50 dark:bg-purple-900/30'
-                      : col.subgroup === 'PAYMENT_METHOD'
+                      : ('subgroup' in col && col.subgroup === 'PAYMENT_METHOD')
                       ? 'bg-orange-50 dark:bg-orange-900/30'
                       : 'bg-gray-200 dark:bg-gray-800'
                   }`}
