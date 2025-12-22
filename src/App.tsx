@@ -73,7 +73,7 @@ export default function App() {
           <Route path="/signin" element={<SignIn />} />
           <Route path="/signup" element={<SignUp />} />
           <Route
-            path="/api/seller/verify-email/:token"
+            path="/verify-email/:token"
             element={<VerifyEmail />}
           />
           <Route path="/verify-notice" element={<VerifyNotice />} />

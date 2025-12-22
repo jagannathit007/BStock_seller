@@ -14,23 +14,44 @@ export default function VerifyEmail() {
   useEffect(() => {
     const verify = async () => {
       if (!token) {
-        setError("Invalid verification link");
+        setError("Invalid verification link - no token found");
         setIsLoading(false);
         return;
       }
 
       try {
         const res = await AuthService.verifyEmail(token);
-        if (res.data && res.data.token) {
-          StorageService.setItem(STORAGE_KEYS.TOKEN, res.data.token);
-          setSuccess(true);
-          // Redirect after 2 seconds
-          setTimeout(() => navigate("/signin"), 2000);
+        
+        // Handle response structure: backend returns { status, message, data: { token, seller } }
+        // The AuthService returns res.data which is the axios response data
+        const responseData = res;
+        const tokenValue = responseData?.data?.token || responseData?.token;
+        
+        // Check if verification was successful (status 200)
+        if (responseData?.status === 200) {
+          if (tokenValue) {
+            // Store token and show success
+            StorageService.setItem(STORAGE_KEYS.TOKEN, tokenValue);
+            setSuccess(true);
+            setTimeout(() => navigate("/signin"), 2000);
+          } else if (responseData?.message?.toLowerCase().includes('verified')) {
+            // Verification succeeded but no token (already verified case)
+            setSuccess(true);
+            setTimeout(() => navigate("/signin"), 2000);
+          } else {
+            // Success status but no token - might be an issue
+            setError(responseData?.message || "Verification completed but token not received. Please try logging in.");
+          }
         } else {
-          setError("Verification failed. Please try again.");
+          // Non-200 status means error
+          setError(responseData?.message || "Verification failed. Please try again.");
         }
       } catch (err: any) {
-        setError(err.message || "Verification failed. The link may be invalid or expired.");
+        // Extract error message from various possible locations
+        const errorMessage = err.response?.data?.message || 
+                           err.message || 
+                           "Verification failed. The link may be invalid or expired.";
+        setError(errorMessage);
       } finally {
         setIsLoading(false);
       }
@@ -74,9 +95,12 @@ export default function VerifyEmail() {
                     Back to Sign In
                   </Link>
                   <p className="text-sm text-gray-500">
-                    Didn't receive the email?{" "}
-                    <Link to="/signup" className="text-indigo-600 hover:text-indigo-800 font-medium">
-                      Resend Verification
+                    Link expired or didn't receive the email?{" "}
+                    <Link 
+                      to={`/verify-notice?email=${encodeURIComponent('')}`} 
+                      className="text-indigo-600 hover:text-indigo-800 font-medium"
+                    >
+                      Resend Verification Email
                     </Link>
                   </p>
                 </div>
