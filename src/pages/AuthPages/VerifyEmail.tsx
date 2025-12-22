@@ -25,7 +25,7 @@ export default function VerifyEmail() {
         // Handle response structure: backend returns { status, message, data: { token, seller } }
         // The AuthService returns res.data which is the axios response data
         const responseData = res;
-        const tokenValue = responseData?.data?.token || responseData?.token;
+        const tokenValue = responseData?.data?.token;
         
         // Check if verification was successful (status 200)
         if (responseData?.status === 200) {

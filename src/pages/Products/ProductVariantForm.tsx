@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import CascadingVariantSelector, { VariantOption } from '../../components/products/CascadingVariantSelector';
 import ExcelLikeProductForm, { ProductRowData } from '../../components/products/ExcelLikeProductForm';
 import { ProductService } from '../../services/products/products.services';
+import { SellerProductPermissionService, SellerProductFieldPermission } from '../../services/sellerProductPermission/sellerProductPermission.services';
+import { STORAGE_KEYS, StorageService } from '../../constants/storage';
 import toastHelper from '../../utils/toastHelper';
 
 type PageStep = 'variant-selection' | 'variant-config' | 'form';
@@ -45,6 +47,36 @@ const ProductVariantForm: React.FC = () => {
   const [variantType, setVariantType] = useState<'single' | 'multi' | null>(getInitialVariantType());
   const [selectedVariants, setSelectedVariants] = useState<VariantOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [permissions, setPermissions] = useState<SellerProductFieldPermission[]>([]);
+  
+  // Get current seller ID from storage
+  const getCurrentSellerId = (): string => {
+    const user = StorageService.getItem<any>(STORAGE_KEYS.USER);
+    return user?._id || user?.id || '';
+  };
+  
+  // Helper function to check if field has permission
+  const hasPermission = (fieldName: string): boolean => {
+    if (permissions.length === 0) {
+      return false;
+    }
+    const permission = permissions.find(p => p.fieldName === fieldName);
+    return permission?.hasPermission ?? false;
+  };
+  
+  // Load permissions on mount
+  useEffect(() => {
+    const loadPermissions = async () => {
+      try {
+        const sellerPermissions = await SellerProductPermissionService.getCurrentSellerPermissions();
+        setPermissions(sellerPermissions || []);
+      } catch (error) {
+        console.error('Error loading seller permissions:', error);
+        setPermissions([]);
+      }
+    };
+    loadPermissions();
+  }, []);
   
   // Load product data when editing
   useEffect(() => {
@@ -224,48 +256,18 @@ const ProductVariantForm: React.FC = () => {
         return;
       }
       
-      // Transform rows to backend format and create products
+      // Transform rows to backend format - ONLY include fields with permission
       const productsToCreate = rows.map(row => {
-        // Build countryDeliverables array
-        const countryDeliverables: any[] = [];
-        
         // Helper to convert empty strings to null
         const cleanString = (val: string | null | undefined): string | null => {
           if (!val || val === '' || (typeof val === 'string' && val.trim() === '')) return null;
           return val;
         };
         
-        if (row.hkUsd || row.hkHkd) {
-          countryDeliverables.push({
-            country: 'Hongkong',
-            price: parseFloat(String(row.hkUsd)) || 0,
-            usd: parseFloat(String(row.hkUsd)) || 0,
-            xe: parseFloat(String(row.hkXe)) || 0,
-            local: parseFloat(String(row.hkHkd)) || 0,
-            hkd: parseFloat(String(row.hkHkd)) || 0,
-            paymentTerm: cleanString(row.paymentTerm) || null,
-            paymentMethod: cleanString(row.paymentMethod) || null,
-          });
-        }
-        
-        if (row.dubaiUsd || row.dubaiAed) {
-          countryDeliverables.push({
-            country: 'Dubai',
-            price: parseFloat(String(row.dubaiUsd)) || 0,
-            usd: parseFloat(String(row.dubaiUsd)) || 0,
-            xe: parseFloat(String(row.dubaiXe)) || 0,
-            local: parseFloat(String(row.dubaiAed)) || 0,
-            aed: parseFloat(String(row.dubaiAed)) || 0,
-            paymentTerm: cleanString(row.paymentTerm) || null,
-            paymentMethod: cleanString(row.paymentMethod) || null,
-          });
-        }
-
         // Helper to normalize color to match enum values
         const normalizeColor = (color: string | null | undefined): string | null => {
           if (!color) return null;
           const colorUpper = color.toUpperCase().trim();
-          // Map common color values to enum values
           const colorMap: Record<string, string> = {
             'GRAPHITE': 'Graphite',
             'SILVER': 'Silver',
@@ -273,132 +275,520 @@ const ProductVariantForm: React.FC = () => {
             'SIERRA BLUE': 'Sierra Blue',
             'MIXED': 'Mixed',
           };
-          return colorMap[colorUpper] || color; // Return mapped value or original if not in map
+          return colorMap[colorUpper] || color;
         };
 
         // Helper to normalize country to match enum values
         const normalizeCountry = (country: string | null | undefined): string | null => {
           if (!country) return null;
           const countryUpper = country.toUpperCase().trim();
-          // Map common country codes/values to enum values
           if (countryUpper === 'HK' || countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG') {
             return 'Hongkong';
           }
           if (countryUpper === 'D' || countryUpper === 'DUBAI' || countryUpper === 'USA') {
             return 'Dubai';
           }
-          return country; // Return original if already correct format
+          return country;
         };
+        
+        // Build countryDeliverables - only if seller has permission for price fields
+        const countryDeliverables: any[] = [];
+        
+        if (hasPermission('hkUsd') || hasPermission('hkHkd')) {
+          if (row.hkUsd || row.hkHkd) {
+            countryDeliverables.push({
+              country: 'Hongkong',
+              currency: 'USD',
+              basePrice: parseFloat(String(row.hkUsd)) || 0,
+              exchangeRate: parseFloat(String(row.hkXe)) || null,
+              // Legacy fields
+              usd: parseFloat(String(row.hkUsd)) || 0,
+              xe: parseFloat(String(row.hkXe)) || 0,
+              local: parseFloat(String(row.hkHkd)) || 0,
+              hkd: parseFloat(String(row.hkHkd)) || 0,
+              paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
+              paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
+            });
+          }
+        }
+        
+        if (hasPermission('dubaiUsd') || hasPermission('dubaiAed')) {
+          if (row.dubaiUsd || row.dubaiAed) {
+            countryDeliverables.push({
+              country: 'Dubai',
+              currency: 'USD',
+              basePrice: parseFloat(String(row.dubaiUsd)) || 0,
+              exchangeRate: parseFloat(String(row.dubaiXe)) || null,
+              // Legacy fields
+              usd: parseFloat(String(row.dubaiUsd)) || 0,
+              xe: parseFloat(String(row.dubaiXe)) || 0,
+              local: parseFloat(String(row.dubaiAed)) || 0,
+              aed: parseFloat(String(row.dubaiAed)) || 0,
+              paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
+              paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
+            });
+          }
+        }
 
-        return {
-          skuFamilyId: row.skuFamilyId, // Already validated above - required field
-          gradeId: (row.grade && isValidObjectId(row.grade)) ? row.grade : null,
-          specification: cleanString(row.subModelName) || cleanString(row.version) || cleanString((row as any).specification) || '',
-          simType: row.sim || '',
-          color: normalizeColor(row.colour) || null,
-          ram: cleanString(row.ram) || '',
-          storage: row.storage || '',
-          weight: row.weight ? parseFloat(String(row.weight)) : null,
-          condition: cleanString(row.condition) || null,
-          price: parseFloat(String(row.hkUsd || row.dubaiUsd || 0)),
-          stock: parseFloat(String(row.totalQty)) || 0,
-          country: normalizeCountry(cleanString(row.country)) || null,
-          moq: parseFloat(String(row.moqPerVariant)) || 1,
-          purchaseType: (row.purchaseType === 'full' || row.purchaseType === 'partial') ? row.purchaseType : 'partial',
-          isNegotiable: row.negotiableFixed === '1',
-          // Use flashDeal field from form (code value from constants), convert to boolean string
-          // Assuming code '1' or 'true' means flash deal enabled, empty or '0'/'false' means disabled
-          isFlashDeal: row.flashDeal && (row.flashDeal === '1' || row.flashDeal === 'true' || row.flashDeal.toLowerCase() === 'yes') ? 'true' : 'false',
-          startTime: cleanString(row.startTime) ? new Date(row.startTime).toISOString() : '',
-          expiryTime: cleanString(row.endTime) ? new Date(row.endTime).toISOString() : '',
-          groupCode: variantType === 'multi' 
-            ? (editId && editProducts.length > 0 ? (editProducts[0] as any).groupCode : (row.groupCode || `GROUP-${Date.now()}`))
-            : undefined,
-          sequence: row.sequence || null,
-          countryDeliverables,
-          // Additional fields that need to be stored - convert empty strings to null
-          supplierListingNumber: cleanString(row.supplierListingNumber) || '',
-          packing: cleanString(row.packing) || '',
-          currentLocation: cleanString(row.currentLocation) || '',
-          deliveryLocation: Array.isArray(row.deliveryLocation) 
-            ? row.deliveryLocation 
-            : (row.deliveryLocation && typeof row.deliveryLocation === 'string' 
-                ? (() => {
-                    try {
-                      const parsed = JSON.parse(row.deliveryLocation);
-                      return Array.isArray(parsed) ? parsed : [row.deliveryLocation];
-                    } catch {
-                      return [row.deliveryLocation];
-                    }
-                  })()
-                : []),
-          customMessage: cleanString(row.customMessage) || '',
-          totalMoq: variantType === 'multi' && totalMoq ? parseFloat(String(totalMoq)) : null,
-          paymentTerm: cleanString(row.paymentTerm) || null,
-          paymentMethod: cleanString(row.paymentMethod) || null,
-          shippingTime: cleanString(row.shippingTime) || '',
-          vendor: cleanString(row.vendor) || null,
-          vendorListingNo: cleanString(row.vendorListingNo) || '',
-          carrier: cleanString(row.carrier) || null,
-          carrierListingNo: cleanString(row.carrierListingNo) || '',
-          uniqueListingNo: cleanString(row.uniqueListingNo) || '',
-          tags: cleanString(row.tags) || '',
-          adminCustomMessage: cleanString(row.adminCustomMessage) || '',
-          remark: cleanString(row.remark) || '',
-          warranty: cleanString(row.warranty) || '',
-          batteryHealth: cleanString(row.batteryHealth) || '',
-          lockUnlock: row.lockUnlock === '1',
-        };
-      });
+        // Build product object - ONLY include fields with permission
+        const product: any = {};
+        
+        // Backend-required fields - always include, but use permission-based values or defaults
+        if (hasPermission('skuFamilyId') && row.skuFamilyId && isValidObjectId(row.skuFamilyId)) {
+          product.skuFamilyId = row.skuFamilyId;
+        } else if (!hasPermission('skuFamilyId')) {
+          // Can't update without skuFamilyId permission
+          return null;
+        }
+        
+        // stock is required by backend
+        if (hasPermission('totalQty')) {
+          product.stock = parseFloat(String(row.totalQty)) || 0;
+        } else {
+          product.stock = 0; // Default
+        }
+        
+        // Only include gradeId if permission exists and value is valid
+        if (hasPermission('grade') && row.grade && isValidObjectId(row.grade)) {
+          product.gradeId = row.grade;
+        }
+        
+        // Only include specification if permission exists
+        if (hasPermission('subModelName') || hasPermission('version')) {
+          const spec = cleanString(row.subModelName) || cleanString(row.version) || cleanString((row as any).specification);
+          if (spec) {
+            product.specification = spec;
+          }
+        }
+        
+        // Only include simType if permission exists
+        if (hasPermission('sim') && row.sim) {
+          product.simType = row.sim;
+        }
+        
+        // Only include color if permission exists
+        if (hasPermission('colour')) {
+          const color = normalizeColor(row.colour);
+          if (color) {
+            product.color = color;
+          }
+        }
+        
+        // Only include ram if permission exists
+        if (hasPermission('ram')) {
+          const ram = cleanString(row.ram);
+          if (ram) {
+            product.ram = ram;
+          }
+        }
+        
+        // Only include storage if permission exists
+        if (hasPermission('storage') && row.storage) {
+          product.storage = row.storage;
+        }
+        
+        // Only include weight if permission exists
+        if (hasPermission('weight') && row.weight) {
+          product.weight = parseFloat(String(row.weight));
+        }
+        
+        // Only include condition if permission exists
+        if (hasPermission('condition')) {
+          const condition = cleanString(row.condition);
+          if (condition) {
+            product.condition = condition;
+          }
+        }
+        
+        // Only include country if permission exists
+        if (hasPermission('country')) {
+          const country = normalizeCountry(cleanString(row.country));
+          if (country) {
+            product.country = country;
+          }
+        }
+        
+        // Only include moq if permission exists
+        if (hasPermission('moqPerVariant')) {
+          product.moq = parseFloat(String(row.moqPerVariant)) || 1;
+        } else {
+          product.moq = 1; // Default
+        }
+        
+        // Only include purchaseType if permission exists
+        if (hasPermission('purchaseType')) {
+          product.purchaseType = (row.purchaseType === 'full' || row.purchaseType === 'partial') ? row.purchaseType : 'partial';
+        } else {
+          product.purchaseType = 'partial'; // Default
+        }
+        
+        // Only include isNegotiable if permission exists
+        if (hasPermission('negotiableFixed')) {
+          product.isNegotiable = row.negotiableFixed === '1';
+        }
+        
+        // Only include isFlashDeal if permission exists
+        if (hasPermission('flashDeal')) {
+          product.isFlashDeal = row.flashDeal && (row.flashDeal === '1' || row.flashDeal === 'true' || row.flashDeal.toLowerCase() === 'yes') ? 'true' : 'false';
+        }
+        
+        // Only include startTime if permission exists
+        if (hasPermission('startTime') && cleanString(row.startTime)) {
+          product.startTime = new Date(row.startTime).toISOString();
+        }
+        
+        // Only include expiryTime if permission exists
+        if (hasPermission('endTime') && cleanString(row.endTime)) {
+          product.expiryTime = new Date(row.endTime).toISOString();
+        }
+        
+        // Group code for multi-variant
+        if (variantType === 'multi') {
+          product.groupCode = editId && editProducts.length > 0 
+            ? (editProducts[0] as any).groupCode 
+            : (row.groupCode || `GROUP-${Date.now()}`);
+        }
+        
+        // Sequence
+        if (row.sequence) {
+          product.sequence = row.sequence;
+        }
+        
+        // Country deliverables - only include if seller has permission for price fields
+        if (countryDeliverables.length > 0) {
+          product.countryDeliverables = countryDeliverables;
+        }
+        
+        // Always include sellerId
+        product.sellerId = hasPermission('supplierId') ? (cleanString(row.supplierId) || getCurrentSellerId()) : getCurrentSellerId();
+        
+        // Only include supplierListingNumber if permission exists
+        if (hasPermission('supplierListingNumber')) {
+          const supplierListingNo = cleanString(row.supplierListingNumber);
+          if (supplierListingNo) {
+            product.supplierListingNumber = supplierListingNo;
+          }
+        }
+        
+        // Only include customerListingNumber if permission exists
+        if (hasPermission('customerListingNumber')) {
+          const customerListingNo = cleanString(row.customerListingNumber);
+          if (customerListingNo) {
+            product.customerListingNumber = customerListingNo;
+          }
+        }
+        
+        // Only include packing if permission exists
+        if (hasPermission('packing')) {
+          const packingValue = cleanString(row.packing);
+          if (packingValue) {
+            product.packing = packingValue;
+          }
+        }
+        
+        // Only include currentLocation if permission exists
+        if (hasPermission('currentLocation')) {
+          const currentLoc = cleanString(row.currentLocation);
+          if (currentLoc) {
+            product.currentLocation = currentLoc;
+          }
+        }
+        
+        // Only include deliveryLocation if permission exists
+        if (hasPermission('deliveryLocation') && Array.isArray(row.deliveryLocation) && row.deliveryLocation.length > 0) {
+          product.deliveryLocation = row.deliveryLocation;
+        }
+        
+        // Only include customMessage if permission exists
+        if (hasPermission('customMessage')) {
+          const customMsg = cleanString(row.customMessage);
+          if (customMsg) {
+            product.customMessage = customMsg;
+          }
+        }
+        
+        // Only include totalMoq if permission exists
+        if (variantType === 'multi' && hasPermission('totalMoq') && totalMoq) {
+          product.totalMoq = parseFloat(String(totalMoq));
+        }
+        
+        // Only include paymentTerm if permission exists
+        if (hasPermission('paymentTerm')) {
+          const paymentTermValue = cleanString(row.paymentTerm);
+          if (paymentTermValue) {
+            product.paymentTerm = paymentTermValue;
+          }
+        }
+        
+        // Only include paymentMethod if permission exists
+        if (hasPermission('paymentMethod')) {
+          const paymentMethodValue = cleanString(row.paymentMethod);
+          if (paymentMethodValue) {
+            product.paymentMethod = paymentMethodValue;
+          }
+        }
+        
+        // Only include shippingTime if permission exists
+        if (hasPermission('shippingTime')) {
+          const shippingTimeValue = cleanString(row.shippingTime);
+          if (shippingTimeValue) {
+            product.shippingTime = shippingTimeValue;
+          }
+        }
+        
+        // Only include vendor if permission exists
+        if (hasPermission('vendor')) {
+          const vendorValue = cleanString(row.vendor);
+          if (vendorValue) {
+            product.vendor = vendorValue;
+          }
+        }
+        
+        // Only include vendorListingNo if permission exists
+        if (hasPermission('vendorListingNo')) {
+          const vendorListingNoValue = cleanString(row.vendorListingNo);
+          if (vendorListingNoValue) {
+            product.vendorListingNo = vendorListingNoValue;
+          }
+        }
+        
+        // Only include carrier if permission exists
+        if (hasPermission('carrier')) {
+          const carrierValue = cleanString(row.carrier);
+          if (carrierValue) {
+            product.carrier = carrierValue;
+          }
+        }
+        
+        // Only include carrierListingNo if permission exists
+        if (hasPermission('carrierListingNo')) {
+          const carrierListingNoValue = cleanString(row.carrierListingNo);
+          if (carrierListingNoValue) {
+            product.carrierListingNo = carrierListingNoValue;
+          }
+        }
+        
+        // Only include uniqueListingNo if permission exists
+        if (hasPermission('uniqueListingNo')) {
+          const uniqueListingNoValue = cleanString(row.uniqueListingNo);
+          if (uniqueListingNoValue) {
+            product.uniqueListingNo = uniqueListingNoValue;
+          }
+        }
+        
+        // Only include tags if permission exists
+        if (hasPermission('tags')) {
+          const tagsValue = cleanString(row.tags);
+          if (tagsValue) {
+            product.tags = tagsValue;
+          }
+        }
+        
+        // Only include remark if permission exists
+        if (hasPermission('remark')) {
+          const remarkValue = cleanString(row.remark);
+          if (remarkValue) {
+            product.remark = remarkValue;
+          }
+        }
+        
+        // Only include warranty if permission exists
+        if (hasPermission('warranty')) {
+          const warrantyValue = cleanString(row.warranty);
+          if (warrantyValue) {
+            product.warranty = warrantyValue;
+          }
+        }
+        
+        // Only include batteryHealth if permission exists
+        if (hasPermission('batteryHealth')) {
+          const batteryHealthValue = cleanString(row.batteryHealth);
+          if (batteryHealthValue) {
+            product.batteryHealth = batteryHealthValue;
+          }
+        }
+        
+        // Only include lockUnlock if permission exists
+        if (hasPermission('lockUnlock')) {
+          product.lockUnlock = row.lockUnlock === '1';
+        }
+        
+        // Calculate price from countryDeliverables for legacy support
+        if (countryDeliverables.length > 0) {
+          const firstDeliverable = countryDeliverables[0];
+          product.price = firstDeliverable.basePrice || firstDeliverable.usd || 0;
+        } else {
+          product.price = 0;
+        }
+        
+        return product;
+      }).filter(product => product !== null); // Filter out null products
 
       // Update or create products
       if (editId) {
-        // Update existing products
-        if (variantType === 'single' && editProduct?._id) {
-          // Single variant update - map to seller update format
+        // Update existing products - only send fields with permission
+        if (variantType === 'single' && editProduct?._id && productsToCreate.length > 0) {
+          // Single variant update - build payload with only permitted fields
           const productData = productsToCreate[0];
-          await ProductService.update({
+          const updatePayload: any = {
             id: editProduct._id,
-            skuFamilyId: productData.skuFamilyId,
-            specification: productData.specification || '',
-            simType: productData.simType || '',
-            color: productData.color || undefined,
-            ram: productData.ram || '',
-            storage: productData.storage || '',
-            condition: productData.condition || '',
-            price: productData.price || 0,
-            stock: productData.stock || 0,
-            country: productData.country || undefined,
-            moq: productData.moq || 1,
-            isNegotiable: productData.isNegotiable || false,
-            isFlashDeal: productData.isFlashDeal === 'true',
-            purchaseType: productData.purchaseType || 'partial',
-            expiryTime: productData.expiryTime || undefined,
-          });
+          };
+          
+          // Helper to safely add field only if permission exists and value is not undefined/null
+          const addFieldIfPermitted = (fieldName: string, value: any, allowZero: boolean = false) => {
+            if (hasPermission(fieldName)) {
+              if (value !== undefined && value !== null && (allowZero || value !== '')) {
+                updatePayload[fieldName] = value;
+              }
+            }
+          };
+          
+          // Only include fields that seller has permission for
+          addFieldIfPermitted('skuFamilyId', productData.skuFamilyId);
+          addFieldIfPermitted('gradeId', productData.gradeId);
+          addFieldIfPermitted('specification', productData.specification);
+          addFieldIfPermitted('simType', productData.simType);
+          addFieldIfPermitted('color', productData.color);
+          addFieldIfPermitted('ram', productData.ram);
+          addFieldIfPermitted('storage', productData.storage);
+          addFieldIfPermitted('weight', productData.weight);
+          addFieldIfPermitted('condition', productData.condition);
+          addFieldIfPermitted('country', productData.country);
+          // stock is required by backend - always include it
+          if (hasPermission('totalQty')) {
+            updatePayload.stock = productData.stock !== undefined ? productData.stock : 0;
+          } else {
+            // If no permission, preserve existing stock value
+            updatePayload.stock = editProduct?.stock || 0;
+          }
+          if (hasPermission('moqPerVariant')) {
+            updatePayload.moq = productData.moq !== undefined ? productData.moq : 1;
+          } else {
+            // If no permission, preserve existing moq value
+            updatePayload.moq = editProduct?.moq || 1;
+          }
+          addFieldIfPermitted('purchaseType', productData.purchaseType || 'partial');
+          if (hasPermission('negotiableFixed')) {
+            updatePayload.isNegotiable = productData.isNegotiable !== undefined ? productData.isNegotiable : false;
+          }
+          if (hasPermission('flashDeal')) {
+            updatePayload.isFlashDeal = productData.isFlashDeal !== undefined ? productData.isFlashDeal : 'false';
+          }
+          addFieldIfPermitted('startTime', productData.startTime);
+          addFieldIfPermitted('expiryTime', productData.expiryTime);
+          addFieldIfPermitted('supplierListingNumber', productData.supplierListingNumber);
+          addFieldIfPermitted('customerListingNumber', productData.customerListingNumber);
+          addFieldIfPermitted('packing', productData.packing);
+          addFieldIfPermitted('currentLocation', productData.currentLocation);
+          addFieldIfPermitted('deliveryLocation', productData.deliveryLocation);
+          addFieldIfPermitted('customMessage', productData.customMessage);
+          addFieldIfPermitted('paymentTerm', productData.paymentTerm);
+          addFieldIfPermitted('paymentMethod', productData.paymentMethod);
+          addFieldIfPermitted('shippingTime', productData.shippingTime);
+          addFieldIfPermitted('vendor', productData.vendor);
+          addFieldIfPermitted('vendorListingNo', productData.vendorListingNo);
+          addFieldIfPermitted('carrier', productData.carrier);
+          addFieldIfPermitted('carrierListingNo', productData.carrierListingNo);
+          addFieldIfPermitted('uniqueListingNo', productData.uniqueListingNo);
+          addFieldIfPermitted('tags', productData.tags);
+          addFieldIfPermitted('remark', productData.remark);
+          addFieldIfPermitted('warranty', productData.warranty);
+          addFieldIfPermitted('batteryHealth', productData.batteryHealth);
+          if (hasPermission('lockUnlock')) {
+            updatePayload.lockUnlock = productData.lockUnlock !== undefined ? productData.lockUnlock : false;
+          }
+          
+          // Include countryDeliverables if seller has permission for price fields
+          if ((hasPermission('hkUsd') || hasPermission('hkHkd') || hasPermission('dubaiUsd') || hasPermission('dubaiAed')) 
+              && productData.countryDeliverables && productData.countryDeliverables.length > 0) {
+            updatePayload.countryDeliverables = productData.countryDeliverables;
+            // Also include price for legacy support
+            updatePayload.price = productData.price !== undefined ? productData.price : 0;
+          }
+          
+          await ProductService.update(updatePayload);
           toastHelper.showTost('Product updated successfully!', 'success');
         } else if (variantType === 'multi' && editProducts.length > 0) {
           // Multi variant update - update all products in the group
           const updatePromises = editProducts.map((editProd, index) => {
             if (editProd._id && productsToCreate[index]) {
               const productData = productsToCreate[index];
-              return ProductService.update({
+              const updatePayload: any = {
                 id: editProd._id,
-                skuFamilyId: productData.skuFamilyId,
-                specification: productData.specification || '',
-                simType: productData.simType || '',
-                color: productData.color || undefined,
-                ram: productData.ram || '',
-                storage: productData.storage || '',
-                condition: productData.condition || '',
-                price: productData.price || 0,
-                stock: productData.stock || 0,
-                country: productData.country || undefined,
-                moq: productData.moq || 1,
-                isNegotiable: productData.isNegotiable || false,
-                isFlashDeal: productData.isFlashDeal === 'true',
-                purchaseType: productData.purchaseType || 'partial',
-                expiryTime: productData.expiryTime || undefined,
-              });
+              };
+              
+              // Helper to safely add field only if permission exists and value is not undefined/null
+              const addFieldIfPermitted = (fieldName: string, value: any, allowZero: boolean = false) => {
+                if (hasPermission(fieldName)) {
+                  if (value !== undefined && value !== null && (allowZero || value !== '')) {
+                    updatePayload[fieldName] = value;
+                  }
+                }
+              };
+              
+              // Only include fields that seller has permission for
+              addFieldIfPermitted('skuFamilyId', productData.skuFamilyId);
+              addFieldIfPermitted('gradeId', productData.gradeId);
+              addFieldIfPermitted('specification', productData.specification);
+              addFieldIfPermitted('simType', productData.simType);
+              addFieldIfPermitted('color', productData.color);
+              addFieldIfPermitted('ram', productData.ram);
+              addFieldIfPermitted('storage', productData.storage);
+              addFieldIfPermitted('weight', productData.weight);
+              addFieldIfPermitted('condition', productData.condition);
+              addFieldIfPermitted('country', productData.country);
+              // stock is required by backend - always include it
+              if (hasPermission('totalQty')) {
+                updatePayload.stock = productData.stock !== undefined ? productData.stock : 0;
+              } else {
+                // If no permission, preserve existing stock value
+                updatePayload.stock = editProd?.stock || 0;
+              }
+              if (hasPermission('moqPerVariant')) {
+                updatePayload.moq = productData.moq !== undefined ? productData.moq : 1;
+              } else {
+                // If no permission, preserve existing moq value
+                updatePayload.moq = editProd?.moq || 1;
+              }
+              addFieldIfPermitted('purchaseType', productData.purchaseType || 'partial');
+              if (hasPermission('negotiableFixed')) {
+                updatePayload.isNegotiable = productData.isNegotiable !== undefined ? productData.isNegotiable : false;
+              }
+              if (hasPermission('flashDeal')) {
+                updatePayload.isFlashDeal = productData.isFlashDeal !== undefined ? productData.isFlashDeal : 'false';
+              }
+              addFieldIfPermitted('startTime', productData.startTime);
+              addFieldIfPermitted('expiryTime', productData.expiryTime);
+              addFieldIfPermitted('supplierListingNumber', productData.supplierListingNumber);
+              addFieldIfPermitted('customerListingNumber', productData.customerListingNumber);
+              addFieldIfPermitted('packing', productData.packing);
+              addFieldIfPermitted('currentLocation', productData.currentLocation);
+              addFieldIfPermitted('deliveryLocation', productData.deliveryLocation);
+              addFieldIfPermitted('customMessage', productData.customMessage);
+              addFieldIfPermitted('paymentTerm', productData.paymentTerm);
+              addFieldIfPermitted('paymentMethod', productData.paymentMethod);
+              addFieldIfPermitted('shippingTime', productData.shippingTime);
+              addFieldIfPermitted('vendor', productData.vendor);
+              addFieldIfPermitted('vendorListingNo', productData.vendorListingNo);
+              addFieldIfPermitted('carrier', productData.carrier);
+              addFieldIfPermitted('carrierListingNo', productData.carrierListingNo);
+              addFieldIfPermitted('uniqueListingNo', productData.uniqueListingNo);
+              addFieldIfPermitted('tags', productData.tags);
+              addFieldIfPermitted('remark', productData.remark);
+              addFieldIfPermitted('warranty', productData.warranty);
+              addFieldIfPermitted('batteryHealth', productData.batteryHealth);
+              if (hasPermission('lockUnlock')) {
+                updatePayload.lockUnlock = productData.lockUnlock !== undefined ? productData.lockUnlock : false;
+              }
+              
+              // Include countryDeliverables if seller has permission for price fields
+              if ((hasPermission('hkUsd') || hasPermission('hkHkd') || hasPermission('dubaiUsd') || hasPermission('dubaiAed')) 
+                  && productData.countryDeliverables && productData.countryDeliverables.length > 0) {
+                updatePayload.countryDeliverables = productData.countryDeliverables;
+                updatePayload.price = productData.price !== undefined ? productData.price : 0;
+              }
+              
+              return ProductService.update(updatePayload);
             }
             return Promise.resolve();
           });

@@ -42,6 +42,28 @@ export interface UpdateProductRequest {
   isFlashDeal?: boolean;
   expiryTime?: string;
   purchaseType?: string;
+  countryDeliverables?: any[];
+  weight?: number;
+  supplierListingNumber?: string;
+  customerListingNumber?: string;
+  packing?: string;
+  currentLocation?: string;
+  deliveryLocation?: string[];
+  customMessage?: string;
+  paymentTerm?: string;
+  paymentMethod?: string;
+  shippingTime?: string;
+  vendor?: string;
+  vendorListingNo?: string;
+  carrier?: string;
+  carrierListingNo?: string;
+  uniqueListingNo?: string;
+  tags?: string;
+  remark?: string;
+  warranty?: string;
+  batteryHealth?: string;
+  lockUnlock?: boolean;
+  startTime?: string;
 }
 
 export interface ListProductsRequest {
@@ -138,38 +160,131 @@ export class ProductService {
   ): Promise<ApiResponse> => {
     const url = `${env.baseUrl}/api/seller/product/update`;
     try {
-      // Process payload similar to create method
-      const processedPayload = {
-        id: payload.id,
-        skuFamilyId: payload.skuFamilyId, 
-        subSkuFamilyId: payload.subSkuFamilyId,
-        specification: payload.specification,
-        simType: payload.simType,
-        color: payload.color,
-        ram: payload.ram,
-        storage: payload.storage,
-        condition: payload.condition,
-        price: Number(payload.price),
-        stock: Number(payload.stock),
-        country: payload.country,
-        moq: Number(payload.moq),
-        isNegotiable: Boolean(payload.isNegotiable),
-        isFlashDeal: Boolean(payload.isFlashDeal),
-        purchaseType: payload.purchaseType || "partial",
-        expiryTime: payload.isFlashDeal ? payload.expiryTime : undefined,
+      // Build processed payload - only include fields that are actually provided
+      // This ensures we only update fields the seller has permission for
+      const processedPayload: any = {
+        id: payload.id, // Always required
       };
       
-      // Remove undefined and empty-string values, but always keep subSkuFamilyId if provided (even empty string)
-      const cleanPayload = Object.fromEntries(
-        Object.entries(processedPayload).filter(([key, value]) => {
-          if (key === "subSkuFamilyId") {
-            return value !== undefined; // allow empty string to pass through
-          }
-          return value !== undefined && value !== "";
-        })
-      );
+      // Only process and include fields that are present in the payload
+      if (payload.skuFamilyId !== undefined) {
+        processedPayload.skuFamilyId = payload.skuFamilyId;
+      }
+      if (payload.subSkuFamilyId !== undefined) {
+        processedPayload.subSkuFamilyId = payload.subSkuFamilyId;
+      }
+      if (payload.specification !== undefined) {
+        processedPayload.specification = payload.specification;
+      }
+      if (payload.simType !== undefined) {
+        processedPayload.simType = payload.simType;
+      }
+      if (payload.color !== undefined) {
+        processedPayload.color = payload.color;
+      }
+      if (payload.ram !== undefined) {
+        processedPayload.ram = payload.ram;
+      }
+      if (payload.storage !== undefined) {
+        processedPayload.storage = payload.storage;
+      }
+      if (payload.condition !== undefined) {
+        processedPayload.condition = payload.condition;
+      }
+      if (payload.price !== undefined) {
+        processedPayload.price = Number(payload.price);
+      }
+      if (payload.stock !== undefined) {
+        processedPayload.stock = Number(payload.stock);
+      }
+      if (payload.country !== undefined) {
+        processedPayload.country = payload.country;
+      }
+      if (payload.moq !== undefined) {
+        processedPayload.moq = Number(payload.moq);
+      }
+      if (payload.isNegotiable !== undefined) {
+        processedPayload.isNegotiable = Boolean(payload.isNegotiable);
+      }
+      if (payload.isFlashDeal !== undefined) {
+        processedPayload.isFlashDeal = Boolean(payload.isFlashDeal);
+      }
+      if (payload.purchaseType !== undefined) {
+        processedPayload.purchaseType = payload.purchaseType;
+      }
+      if (payload.expiryTime !== undefined) {
+        processedPayload.expiryTime = payload.expiryTime;
+      }
+      if (payload.weight !== undefined) {
+        processedPayload.weight = payload.weight;
+      }
+      if (payload.supplierListingNumber !== undefined) {
+        processedPayload.supplierListingNumber = payload.supplierListingNumber;
+      }
+      if (payload.customerListingNumber !== undefined) {
+        processedPayload.customerListingNumber = payload.customerListingNumber;
+      }
+      if (payload.packing !== undefined) {
+        processedPayload.packing = payload.packing;
+      }
+      if (payload.currentLocation !== undefined) {
+        processedPayload.currentLocation = payload.currentLocation;
+      }
+      if (payload.deliveryLocation !== undefined) {
+        processedPayload.deliveryLocation = payload.deliveryLocation;
+      }
+      if (payload.customMessage !== undefined) {
+        processedPayload.customMessage = payload.customMessage;
+      }
+      if (payload.paymentTerm !== undefined) {
+        processedPayload.paymentTerm = payload.paymentTerm;
+      }
+      if (payload.paymentMethod !== undefined) {
+        processedPayload.paymentMethod = payload.paymentMethod;
+      }
+      if (payload.shippingTime !== undefined) {
+        processedPayload.shippingTime = payload.shippingTime;
+      }
+      if (payload.vendor !== undefined) {
+        processedPayload.vendor = payload.vendor;
+      }
+      if (payload.vendorListingNo !== undefined) {
+        processedPayload.vendorListingNo = payload.vendorListingNo;
+      }
+      if (payload.carrier !== undefined) {
+        processedPayload.carrier = payload.carrier;
+      }
+      if (payload.carrierListingNo !== undefined) {
+        processedPayload.carrierListingNo = payload.carrierListingNo;
+      }
+      if (payload.uniqueListingNo !== undefined) {
+        processedPayload.uniqueListingNo = payload.uniqueListingNo;
+      }
+      if (payload.tags !== undefined) {
+        processedPayload.tags = payload.tags;
+      }
+      if (payload.remark !== undefined) {
+        processedPayload.remark = payload.remark;
+      }
+      if (payload.warranty !== undefined) {
+        processedPayload.warranty = payload.warranty;
+      }
+      if (payload.batteryHealth !== undefined) {
+        processedPayload.batteryHealth = payload.batteryHealth;
+      }
+      if (payload.lockUnlock !== undefined) {
+        processedPayload.lockUnlock = Boolean(payload.lockUnlock);
+      }
+      if (payload.startTime !== undefined) {
+        processedPayload.startTime = payload.startTime;
+      }
       
-      const res = await api.post(url, cleanPayload);
+      // Include countryDeliverables if provided (for price updates)
+      if (payload.countryDeliverables && Array.isArray(payload.countryDeliverables) && payload.countryDeliverables.length > 0) {
+        processedPayload.countryDeliverables = payload.countryDeliverables;
+      }
+      
+      const res = await api.post(url, processedPayload);
       const data: ApiResponse = res.data;
       toastHelper.showTost(
         data.message || "Product updated successfully",
