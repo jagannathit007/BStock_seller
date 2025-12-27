@@ -582,9 +582,9 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         const constantsData = await ConstantsService.getConstants();
         setConstants(constantsData);
         
-        // Fetch next customer listing number
+        // Fetch next customer listing number WITH multi-variant support
         try {
-          const customerListingData = await ProductService.getNextCustomerListingNumber();
+          const customerListingData = await ProductService.getNextCustomerListingNumber(variantType === 'multi');
           setCurrentCustomerListingNumber(customerListingData.data?.listingNumber || 1);
         } catch (error) {
           console.error('Error fetching customer listing number:', error);
@@ -794,15 +794,22 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     if (currentCustomerListingNumber !== null && rows.length > 0) {
       setRows(prevRows => prevRows.map((row, index) => {
         const updatedRow = { ...row };
-        const productNumber = index + 1;
-        const customerListingNo = `L${currentCustomerListingNumber}-${productNumber}`;
+        let prefix = `L${currentCustomerListingNumber}`;
+
+        // For multi-variant: L{N}M{N} (e.g., L1M1, L2M2) - M number matches L number
+        if (variantType === 'multi') {
+          prefix = `L${currentCustomerListingNumber}M${currentCustomerListingNumber}`;
+        }
+
+        const customerListingNo = `${prefix}-${index + 1}`;
+
         if (!updatedRow.customerListingNumber || updatedRow.customerListingNumber !== customerListingNo) {
           updatedRow.customerListingNumber = customerListingNo;
         }
         return updatedRow;
       }));
     }
-  }, [rows.length, currentCustomerListingNumber]);
+  }, [rows.length, currentCustomerListingNumber, variantType]);
 
   // Auto-generate unique listing numbers when rows change
   useEffect(() => {
@@ -829,8 +836,10 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         
         // Count how many rows come before this row (for product number)
         const productNum = index + 1;
+        // For multi-variant: L{N}M{N} (e.g., L1M1, L2M2) - M number matches L number
+        // For single: L{N}
         const listingPrefix = variantType === 'multi' 
-          ? `L${supplierListingNumberInfo.listingNumber}M1` 
+          ? `L${supplierListingNumberInfo.listingNumber}M${supplierListingNumberInfo.listingNumber}` 
           : `L${supplierListingNumberInfo.listingNumber}`;
         const expectedListingNo = `${supplierListingNumberInfo.supplierCode}-${listingPrefix}-${productNum}`;
         

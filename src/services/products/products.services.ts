@@ -331,10 +331,10 @@ export class ProductService {
   };
 
   // Get next customer listing number
-  static getNextCustomerListingNumber = async (): Promise<any> => {
+  static getNextCustomerListingNumber = async (isMultiVariant: boolean = false): Promise<any> => {
     const url = `${env.baseUrl}/api/seller/product/get-next-customer-listing-number`;
     try {
-      const res = await api.post(url, {});
+      const res = await api.post(url, { isMultiVariant });
       return res.data;
     } catch (err: any) {
       const errorMessage = err.response?.data?.message || 'Failed to get next customer listing number';
