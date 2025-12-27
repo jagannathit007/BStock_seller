@@ -16,7 +16,6 @@ const ActivitiesTable: React.FC = () => {
   const [totalPages, setTotalPages] = useState<number>(1);
   const [selectedProduct, setSelectedProduct] = useState<ProductVersion | null>(null);
   const [defaultProductId, setDefaultProductId] = useState<string | null>(null);
-  const [noProductsError, setNoProductsError] = useState<boolean>(false);
   const itemsPerPage = 10;
 
   const location = useLocation();
@@ -49,15 +48,11 @@ const ActivitiesTable: React.FC = () => {
       if (response?.data?.docs && response.data.docs.length > 0) {
         const firstProduct = response.data.docs[0];
         setDefaultProductId(firstProduct._id || firstProduct.id);
-        setNoProductsError(false);
         // Immediately trigger history fetch once we know the product id
         await fetchHistoryData(firstProduct._id || firstProduct.id);
-      } else {
-        setNoProductsError(true);
       }
     } catch (error) {
       // Non-blocking: if fetching default product fails, just show empty state
-      setNoProductsError(true);
     }
   };
 

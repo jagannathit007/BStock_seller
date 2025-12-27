@@ -153,10 +153,19 @@ export class AuthService {
     
     try {
       const res = await api.get(url);
-      toastHelper.showTost(res.data.message || 'Email verified successfully!', 'success');
-      return res.data;
+      
+      // Check if verification was successful
+      if (res.data.status === 200) {
+        toastHelper.showTost(res.data.message || 'Email verified successfully!', 'success');
+        return res.data;
+      } else {
+        // If status is not 200, treat as error
+        const errorMessage = res.data.message || 'Failed to verify email';
+        toastHelper.showTost(errorMessage, 'error');
+        throw new Error(errorMessage);
+      }
     } catch (err: any) {
-      const errorMessage = err.response?.data?.message || 'Failed to verify email';
+      const errorMessage = err.response?.data?.message || err.message || 'Failed to verify email';
       toastHelper.showTost(errorMessage, 'error');
       throw new Error(errorMessage);
     }
