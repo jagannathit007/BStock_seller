@@ -823,17 +823,21 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
   }, [rows.map(r => `${r.currentLocation}-${r.hkUsd}-${r.hkHkd}-${r.dubaiUsd}-${r.dubaiAed}`).join(',')]);
 
   // Auto-generate customer listing numbers when rows change
+  // Format: L{number}-{index+1} for single, L{number}M{number}-{index+1} for multi
+  // Counting is overall (not per seller), NO supplier code
+  // For multi-variant: M number matches L number (L1M1, L2M2, etc.) - same as admin panel
   useEffect(() => {
     if (currentCustomerListingNumber !== null && rows.length > 0) {
       setRows(prevRows => prevRows.map((row, index) => {
         const updatedRow = { ...row };
         let prefix = `L${currentCustomerListingNumber}`;
         
-        // Add M1 suffix for multi-variant (same as admin panel)
+        // For multi-variant: L{N}M{N} (e.g., L1M1, L2M2) - M number matches L number
         if (variantType === 'multi') {
-          prefix = `L${currentCustomerListingNumber}M1`;
+          prefix = `L${currentCustomerListingNumber}M${currentCustomerListingNumber}`;
         }
         
+        // Customer listing number: NO supplier code, overall counting
         const customerListingNo = `${prefix}-${index + 1}`;
         
         if (!updatedRow.customerListingNumber || updatedRow.customerListingNumber !== customerListingNo) {
@@ -859,6 +863,9 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
   }, [rows.length, currentUniqueListingNumber]);
 
   // Auto-generate supplier listing numbers when rows change
+  // Format: {supplierCode}-L{number}-{index+1} for single, {supplierCode}-L{number}M{number}-{index+1} for multi
+  // Counting is per seller (individual), includes supplier code
+  // For multi-variant: M number matches L number (L1M1, L2M2, etc.) - same as admin panel
   useEffect(() => {
     if (!supplierListingNumberInfo || rows.length === 0) return;
     
@@ -867,11 +874,16 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
       const updatedRows = prevRows.map((row, index) => {
         const updatedRow = { ...row };
         
-        // Count how many rows come before this row (for product number)
+        // Count how many rows come before this row (for product number) - per seller individual counting
         const productNum = index + 1;
+        
+        // For multi-variant: L{N}M{N} (e.g., L1M1, L2M2) - M number matches L number
+        // For single: L{N}
         const listingPrefix = variantType === 'multi' 
-          ? `L${supplierListingNumberInfo.listingNumber}M1` 
+          ? `L${supplierListingNumberInfo.listingNumber}M${supplierListingNumberInfo.listingNumber}` 
           : `L${supplierListingNumberInfo.listingNumber}`;
+        
+        // Include supplier code in supplier listing number
         const expectedListingNo = `${supplierListingNumberInfo.supplierCode}-${listingPrefix}-${productNum}`;
         
         if (updatedRow.supplierListingNumber !== expectedListingNo) {
