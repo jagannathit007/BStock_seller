@@ -1,5 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import Swal from 'sweetalert2';
+import { STORAGE_KEYS, StorageService } from '../../constants/storage';
+import { AuthService } from '../../services/auth/auth.services';
 
 interface VariantSelectionModalProps {
   isOpen: boolean;
@@ -11,10 +14,41 @@ const VariantSelectionModal: React.FC<VariantSelectionModalProps> = ({ isOpen, o
 
   if (!isOpen) return null;
 
-  const handleVariantSelection = (type: 'single' | 'multi') => {
-    onClose();
-    // Navigate to form page with type parameter
-    navigate(`/products/create?type=${type}`);
+  const handleVariantSelection = async (type: 'single' | 'multi') => {
+    // Check business profile approval status before navigating
+    try {
+      // First check localStorage
+      const stored = StorageService.getItem(STORAGE_KEYS.USER);
+      let businessProfileStatus = stored?.businessProfile?.status;
+      
+      // If not in localStorage or status is not approved, fetch fresh profile
+      if (!businessProfileStatus || businessProfileStatus !== 'approved') {
+        const profile = await AuthService.getProfile();
+        businessProfileStatus = profile?.data?.businessProfile?.status;
+      }
+      
+      if (businessProfileStatus !== 'approved') {
+        // Show confirmation/info box instead of error
+        await Swal.fire({
+          icon: "info",
+          title: "Business Profile Approval Required",
+          html: `<p style="text-align: left; margin: 10px 0;">Your business profile must be approved by admin before you can create products. Please wait for admin approval or contact support if you have already submitted your business profile.</p>`,
+          confirmButtonText: "OK",
+          confirmButtonColor: "#0071E0",
+          width: "500px",
+        });
+        return;
+      }
+      
+      // If approved, navigate to form
+      onClose();
+      navigate(`/products/create?type=${type}`);
+    } catch (error) {
+      console.error('Error checking business profile:', error);
+      // On error, still navigate (let backend handle the validation)
+      onClose();
+      navigate(`/products/create?type=${type}`);
+    }
   };
 
   return (

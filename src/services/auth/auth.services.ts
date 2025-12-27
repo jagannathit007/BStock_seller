@@ -46,6 +46,7 @@ export interface ProfileData {
   logo?: File | string | null;
   certificate?: File | string | null;
   profileImage?: File | string | null;
+  submitForApproval?: boolean;
 }
 
 export interface BusinessProfile {
@@ -238,6 +239,10 @@ export class AuthService {
       form.append('name', payload.name || '');
       form.append('email', payload.email || '');
       form.append('mobileNumber', payload.mobileNumber || '');
+      // Include submitForApproval flag if provided
+      if (payload.submitForApproval !== undefined) {
+        form.append('submitForApproval', payload.submitForApproval.toString());
+      }
 
       if (payload.logo instanceof File) {
         form.append('logo', payload.logo);
@@ -271,7 +276,7 @@ export class AuthService {
       }
     } else {
       // Use JSON for non-file updates
-      const jsonPayload = {
+      const jsonPayload: any = {
         businessName: payload.businessName || '',
         country: payload.country || '',
         address: payload.address || '',
@@ -279,6 +284,10 @@ export class AuthService {
         email: payload.email || '',
         mobileNumber: payload.mobileNumber || ''
       };
+      // Include submitForApproval flag if provided
+      if (payload.submitForApproval !== undefined) {
+        jsonPayload.submitForApproval = payload.submitForApproval;
+      }
 
       try {
         const url = `${baseUrl}/api/seller/updateBusinessProfile`;
