@@ -447,7 +447,15 @@ export class ProductService {
       toastHelper.showTost(res.data.message || 'Product request submitted successfully!', 'success');
       return res.data;
     } catch (err: any) {
-      const errorMessage = err.response?.data?.message || 'Failed to create product request';
+      const errorCode = err.response?.data?.code || err.response?.data?.data?.code;
+      const errorMessage = err.response?.data?.message || err.response?.data?.data?.message || 'Failed to create product request';
+      
+      // Check if it's a business profile approval error
+      if (errorCode === 'BUSINESS_PROFILE_NOT_APPROVED' || errorMessage.includes('business profile must be approved')) {
+        // Don't show toast, let the caller handle it with Swal
+        throw new Error(errorMessage);
+      }
+      
       toastHelper.showTost(errorMessage, 'error');
       throw new Error(errorMessage);
     }

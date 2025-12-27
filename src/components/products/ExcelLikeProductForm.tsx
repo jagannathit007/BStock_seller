@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import Select from 'react-select';
+import Swal from 'sweetalert2';
 import { VariantOption } from './CascadingVariantSelector';
 import { GradeService } from '../../services/grade/grade.services';
 import { ProductService } from '../../services/products/products.services';
@@ -1729,7 +1730,22 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
       }, 1000);
     } catch (error: any) {
       console.error('Error creating product requests:', error);
-      toastHelper.showTost(error.message || 'Failed to submit product requests', 'error');
+      const errorMessage = error.message || 'Failed to submit product requests';
+      
+      // Check if it's a business profile approval error
+      if (errorMessage.includes('business profile must be approved') || errorMessage.includes('BUSINESS_PROFILE_NOT_APPROVED')) {
+        // Show confirmation/info box instead of error toast
+        await Swal.fire({
+          icon: "info",
+          title: "Business Profile Approval Required",
+          html: `<p style="text-align: left; margin: 10px 0;">${errorMessage}</p>`,
+          confirmButtonText: "OK",
+          confirmButtonColor: "#0071E0",
+          width: "500px",
+        });
+      } else {
+        toastHelper.showTost(errorMessage, 'error');
+      }
     } finally {
       setLoading(false);
     }

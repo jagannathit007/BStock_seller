@@ -8,6 +8,8 @@ import ProductModal from "./ProductsModal";
 import VariantSelectionModal from "./VariantSelectionModal";
 import ProductImageVideoModal from "./ProductImageVideoModal";
 import { ProductService } from "../../services/products/products.services";
+import { STORAGE_KEYS, StorageService } from "../../constants/storage";
+import { AuthService } from "../../services/auth/auth.services";
 
 interface Product {
   _id?: string;
@@ -356,7 +358,40 @@ const ProductsTable: React.FC = () => {
             </button> */}
             <button
               className="inline-flex items-center gap-2 rounded-lg bg-[#0071E0] text-white px-4 py-2 text-sm font-medium hover:bg-blue-600 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
-              onClick={() => setShowVariantSelectionModal(true)}
+              onClick={async () => {
+                // Check business profile approval status
+                try {
+                  // First check localStorage
+                  const stored = StorageService.getItem(STORAGE_KEYS.USER);
+                  let businessProfileStatus = stored?.businessProfile?.status;
+                  
+                  // If not in localStorage or status is not approved, fetch fresh profile
+                  if (!businessProfileStatus || businessProfileStatus !== 'approved') {
+                    const profile = await AuthService.getProfile();
+                    businessProfileStatus = profile?.data?.businessProfile?.status;
+                  }
+                  
+                  if (businessProfileStatus !== 'approved') {
+                    // Show confirmation/info box instead of error
+                    await Swal.fire({
+                      icon: "info",
+                      title: "Business Profile Approval Required",
+                      html: `<p style="text-align: left; margin: 10px 0;">Your business profile must be approved by admin before you can create products. Please wait for admin approval or contact support if you have already submitted your business profile.</p>`,
+                      confirmButtonText: "OK",
+                      confirmButtonColor: "#0071E0",
+                      width: "500px",
+                    });
+                    return;
+                  }
+                  
+                  // If approved, show the variant selection modal
+                  setShowVariantSelectionModal(true);
+                } catch (error) {
+                  console.error('Error checking business profile:', error);
+                  // On error, still show the modal (let backend handle the validation)
+                  setShowVariantSelectionModal(true);
+                }
+              }}
             >
               <i className="fas fa-plus text-xs"></i>
               Add Product Request

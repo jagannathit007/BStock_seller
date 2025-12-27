@@ -57,6 +57,55 @@ export default function UserInfoCard({
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [certificateFile, setCertificateFile] = useState<File | null>(null);
 
+  // Helper function to construct full image URL from relative path
+  const getImageUrl = (path: string | null | undefined): string | null => {
+    if (!path) return null;
+    const base = (import.meta as { env?: { VITE_BASE_URL?: string } }).env?.VITE_BASE_URL || '';
+    const isAbsolute = /^https?:\/\//i.test(path);
+    if (isAbsolute) return path;
+    return `${base}${path.startsWith("/") ? "" : "/"}${path}`;
+  };
+
+  // Load images from profile when component mounts or profile updates
+  useEffect(() => {
+    const loadImagesFromProfile = async () => {
+      try {
+        // First try to get from localStorage
+        const stored = StorageService.getItem(STORAGE_KEYS.USER);
+        if (stored) {
+          const user = stored as any;
+          const business = user?.businessProfile || {};
+          if (business?.logo) {
+            const logoUrl = getImageUrl(business.logo);
+            if (logoUrl) setLogoImage(logoUrl);
+          }
+          if (business?.certificate) {
+            const certUrl = getImageUrl(business.certificate);
+            if (certUrl) setCertificateImage(certUrl);
+          }
+        }
+
+        // Then fetch fresh profile from API
+        const profile = await AuthService.getProfile();
+        const p: any = profile?.data || {};
+        const bp = p?.businessProfile || {};
+        
+        if (bp?.logo) {
+          const logoUrl = getImageUrl(bp.logo);
+          if (logoUrl) setLogoImage(logoUrl);
+        }
+        if (bp?.certificate) {
+          const certUrl = getImageUrl(bp.certificate);
+          if (certUrl) setCertificateImage(certUrl);
+        }
+      } catch (error) {
+        console.error('Error loading images from profile:', error);
+      }
+    };
+
+    loadImagesFromProfile();
+  }, []);
+
   // Country code dropdown state
   const [showPhoneDropdown, setShowPhoneDropdown] = useState(false);
   const [phoneSearchTerm, setPhoneSearchTerm] = useState("");
@@ -184,6 +233,7 @@ export default function UserInfoCard({
         mobileNumber: formData?.phone?.trim(),
         logo: logoFile || undefined,
         certificate: certificateFile || undefined,
+        submitForApproval: true, // Submit business profile for admin verification and approval
       } as any;
 
       await AuthService.updateProfile(payload);
@@ -192,37 +242,50 @@ export default function UserInfoCard({
         const profile = await AuthService.getProfile();
         const stored = StorageService.getItem(STORAGE_KEYS.USER);
         const prevUser = (stored as any) || {};
+        const p: any = profile?.data || {};
+        const bp = p?.businessProfile || {};
+        
         const merged = {
           ...prevUser,
-          name: profile?.data?.name ?? payload.name ?? prevUser?.name,
-          email: profile?.data?.email ?? payload.email ?? prevUser?.email,
+          name: p?.name ?? payload.name ?? prevUser?.name,
+          email: p?.email ?? payload.email ?? prevUser?.email,
           mobileNumber:
-            profile?.data?.mobileNumber ??
+            p?.mobileNumber ??
             payload.mobileNumber ??
             prevUser?.mobileNumber,
           businessProfile: {
             ...(prevUser?.businessProfile || {}),
             businessName:
-              profile?.data?.businessProfile?.businessName ??
+              bp?.businessName ??
               payload.businessName ??
               prevUser?.businessProfile?.businessName,
             country:
-              profile?.data?.businessProfile?.country ??
+              bp?.country ??
               payload.country ??
               prevUser?.businessProfile?.country,
             address:
-              profile?.data?.businessProfile?.address ??
+              bp?.address ??
               payload.address ??
               prevUser?.businessProfile?.address,
             logo:
-              profile?.data?.businessProfile?.logo ??
+              bp?.logo ??
               prevUser?.businessProfile?.logo,
             certificate:
-              profile?.data?.businessProfile?.certificate ??
+              bp?.certificate ??
               prevUser?.businessProfile?.certificate,
           },
         };
         StorageService.setItem(STORAGE_KEYS.USER, merged);
+        
+        // Update image states with new URLs
+        if (bp?.logo) {
+          const logoUrl = getImageUrl(bp.logo);
+          if (logoUrl) setLogoImage(logoUrl);
+        }
+        if (bp?.certificate) {
+          const certUrl = getImageUrl(bp.certificate);
+          if (certUrl) setCertificateImage(certUrl);
+        }
       } catch {}
     } catch (error) {
       // Error toasts handled in service

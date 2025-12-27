@@ -48,7 +48,7 @@ export default function UserProfiles() {
           phone: user?.mobileNumber || "",
           businessName: business?.businessName || "",
           businessCountry: business?.country || "",
-          businessCurrency: business?.currency || "",
+          businessCurrency: business?.currencyCode || business?.currency || "",
           businessAddress: business?.address || "",
         }));
       }
@@ -59,36 +59,41 @@ export default function UserProfiles() {
       try {
       const profile = await AuthService.getProfile();
       const p: any = profile?.data || {};
+      const bp = p?.businessProfile || {};
       setFormData((prev) => ({
         ...prev,
         name: p?.name ?? prev.name,
         email: p?.email ?? prev.email,
-          phone: p?.mobileNumber ?? prev.phone,
-          businessName: p?.businessName ?? p?.businessProfile?.businessName ?? prev.businessName,
-          businessCountry: p?.country ?? p?.businessProfile?.country ?? prev.businessCountry,
-          businessCurrency: p?.currency ?? p?.businessProfile?.currency ?? prev.businessCurrency,
-          businessAddress: p?.address ?? p?.businessProfile?.address ?? prev.businessAddress,
-        }));
+        phone: p?.mobileNumber ?? prev.phone,
+        businessName: bp?.businessName ?? p?.businessName ?? prev.businessName,
+        businessCountry: bp?.country ?? p?.country ?? prev.businessCountry,
+        businessCurrency: bp?.currencyCode ?? bp?.currency ?? p?.currency ?? prev.businessCurrency,
+        businessAddress: bp?.address ?? p?.address ?? prev.businessAddress,
+      }));
 
       // Update localStorage user in sync
       try {
         const stored = StorageService.getItem(STORAGE_KEYS.USER);
         const prevUser = (stored as any) || {};
-          const merged = {
-            ...prevUser,
-            name: p?.name ?? prevUser?.name,
-            email: p?.email ?? prevUser?.email,
-            mobileNumber: p?.mobileNumber ?? prevUser?.mobileNumber,
-            businessProfile: {
-              ...(prevUser?.businessProfile || {}),
-              businessName: p?.businessName ?? p?.businessProfile?.businessName ?? prevUser?.businessProfile?.businessName,
-              country: p?.country ?? p?.businessProfile?.country ?? prevUser?.businessProfile?.country,
-              currency: p?.currency ?? p?.businessProfile?.currency ?? prevUser?.businessProfile?.currency,
-              address: p?.address ?? p?.businessProfile?.address ?? prevUser?.businessProfile?.address,
-              logo: p?.logo ?? prevUser?.businessProfile?.logo,
-              certificate: p?.certificate ?? prevUser?.businessProfile?.certificate,
-            },
-          };
+        const bp = p?.businessProfile || {};
+        const merged = {
+          ...prevUser,
+          name: p?.name ?? prevUser?.name,
+          email: p?.email ?? prevUser?.email,
+          mobileNumber: p?.mobileNumber ?? prevUser?.mobileNumber,
+          businessProfile: {
+            ...(prevUser?.businessProfile || {}),
+            businessName: bp?.businessName ?? p?.businessName ?? prevUser?.businessProfile?.businessName,
+            country: bp?.country ?? p?.country ?? prevUser?.businessProfile?.country,
+            currency: bp?.currencyCode ?? bp?.currency ?? p?.currency ?? prevUser?.businessProfile?.currency,
+            address: bp?.address ?? p?.address ?? prevUser?.businessProfile?.address,
+            logo: bp?.logo ?? p?.logo ?? prevUser?.businessProfile?.logo,
+            certificate: bp?.certificate ?? p?.certificate ?? prevUser?.businessProfile?.certificate,
+            status: bp?.status ?? prevUser?.businessProfile?.status,
+            verifiedBy: bp?.verifiedBy ?? prevUser?.businessProfile?.verifiedBy,
+            approvedBy: bp?.approvedBy ?? prevUser?.businessProfile?.approvedBy,
+          },
+        };
         StorageService.setItem(STORAGE_KEYS.USER, merged);
       } catch {}
       } catch {}
