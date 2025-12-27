@@ -257,7 +257,7 @@ const ProductVariantForm: React.FC = () => {
       }
       
       // Transform rows to backend format - ONLY include fields with permission
-      const productsToCreate = rows.map(row => {
+      const productsToCreate = rows.map((row, rowIndex) => {
         // Helper to convert empty strings to null
         const cleanString = (val: string | null | undefined): string | null => {
           if (!val || val === '' || (typeof val === 'string' && val.trim() === '')) return null;
@@ -292,41 +292,102 @@ const ProductVariantForm: React.FC = () => {
         };
         
         // Build countryDeliverables - only if seller has permission for price fields
-        const countryDeliverables: any[] = [];
+        // In edit mode, preserve existing countryDeliverables and update prices
+        let countryDeliverables: any[] = [];
         
-        if (hasPermission('hkUsd') || hasPermission('hkHkd')) {
-          if (row.hkUsd || row.hkHkd) {
-            countryDeliverables.push({
-              country: 'Hongkong',
-              currency: 'USD',
-              basePrice: parseFloat(String(row.hkUsd)) || 0,
-              exchangeRate: parseFloat(String(row.hkXe)) || null,
-              // Legacy fields
-              usd: parseFloat(String(row.hkUsd)) || 0,
-              xe: parseFloat(String(row.hkXe)) || 0,
-              local: parseFloat(String(row.hkHkd)) || 0,
-              hkd: parseFloat(String(row.hkHkd)) || 0,
-              paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
-              paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
-            });
+        // Get existing product for edit mode
+        // Match rowIndex with editProducts index for multi-variant, or use editProduct for single
+        const existingProduct = editId 
+          ? (variantType === 'single' ? editProduct : (editProducts[rowIndex] || null))
+          : null;
+        
+        if (editId && existingProduct && (existingProduct as any).countryDeliverables) {
+          // Preserve existing countryDeliverables structure and update prices
+          countryDeliverables = (existingProduct as any).countryDeliverables.map((cd: any) => {
+            if (cd.country === 'Hongkong' && (hasPermission('hkUsd') || hasPermission('hkHkd'))) {
+              return {
+                ...cd,
+                basePrice: parseFloat(String(row.hkUsd)) || cd.basePrice || cd.usd || 0,
+                calculatedPrice: cd.calculatedPrice || parseFloat(String(row.hkUsd)) || cd.usd || 0,
+                usd: parseFloat(String(row.hkUsd)) || cd.usd || 0,
+                xe: parseFloat(String(row.hkXe)) || cd.xe || 0,
+                local: parseFloat(String(row.hkHkd)) || cd.local || cd.hkd || 0,
+                hkd: parseFloat(String(row.hkHkd)) || cd.hkd || 0,
+                price: parseFloat(String(row.hkUsd)) || cd.price || cd.usd || 0,
+                exchangeRate: parseFloat(String(row.hkXe)) || cd.exchangeRate || cd.xe || null,
+                // Preserve margins and costs (sellers can't modify these)
+                margins: cd.margins || [],
+                costs: cd.costs || [],
+                charges: cd.charges || [],
+                paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || cd.paymentTerm || null) : (cd.paymentTerm || null),
+                paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || cd.paymentMethod || null) : (cd.paymentMethod || null),
+              };
+            } else if (cd.country === 'Dubai' && (hasPermission('dubaiUsd') || hasPermission('dubaiAed'))) {
+              return {
+                ...cd,
+                basePrice: parseFloat(String(row.dubaiUsd)) || cd.basePrice || cd.usd || 0,
+                calculatedPrice: cd.calculatedPrice || parseFloat(String(row.dubaiUsd)) || cd.usd || 0,
+                usd: parseFloat(String(row.dubaiUsd)) || cd.usd || 0,
+                xe: parseFloat(String(row.dubaiXe)) || cd.xe || 0,
+                local: parseFloat(String(row.dubaiAed)) || cd.local || cd.aed || 0,
+                aed: parseFloat(String(row.dubaiAed)) || cd.aed || 0,
+                price: parseFloat(String(row.dubaiUsd)) || cd.price || cd.usd || 0,
+                exchangeRate: parseFloat(String(row.dubaiXe)) || cd.exchangeRate || cd.xe || null,
+                // Preserve margins and costs (sellers can't modify these)
+                margins: cd.margins || [],
+                costs: cd.costs || [],
+                charges: cd.charges || [],
+                paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || cd.paymentTerm || null) : (cd.paymentTerm || null),
+                paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || cd.paymentMethod || null) : (cd.paymentMethod || null),
+              };
+            }
+            // Return unchanged for other countries
+            return cd;
+          });
+        } else {
+          // Create new countryDeliverables for create mode or when none exist
+          if (hasPermission('hkUsd') || hasPermission('hkHkd')) {
+            if (row.hkUsd || row.hkHkd) {
+              countryDeliverables.push({
+                country: 'Hongkong',
+                currency: 'USD',
+                basePrice: parseFloat(String(row.hkUsd)) || 0,
+                calculatedPrice: parseFloat(String(row.hkUsd)) || 0,
+                exchangeRate: parseFloat(String(row.hkXe)) || null,
+                price: parseFloat(String(row.hkUsd)) || 0,
+                usd: parseFloat(String(row.hkUsd)) || 0,
+                xe: parseFloat(String(row.hkXe)) || 0,
+                local: parseFloat(String(row.hkHkd)) || 0,
+                hkd: parseFloat(String(row.hkHkd)) || 0,
+                margins: [],
+                costs: [],
+                charges: [],
+                paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
+                paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
+              });
+            }
           }
-        }
-        
-        if (hasPermission('dubaiUsd') || hasPermission('dubaiAed')) {
-          if (row.dubaiUsd || row.dubaiAed) {
-            countryDeliverables.push({
-              country: 'Dubai',
-              currency: 'USD',
-              basePrice: parseFloat(String(row.dubaiUsd)) || 0,
-              exchangeRate: parseFloat(String(row.dubaiXe)) || null,
-              // Legacy fields
-              usd: parseFloat(String(row.dubaiUsd)) || 0,
-              xe: parseFloat(String(row.dubaiXe)) || 0,
-              local: parseFloat(String(row.dubaiAed)) || 0,
-              aed: parseFloat(String(row.dubaiAed)) || 0,
-              paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
-              paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
-            });
+          
+          if (hasPermission('dubaiUsd') || hasPermission('dubaiAed')) {
+            if (row.dubaiUsd || row.dubaiAed) {
+              countryDeliverables.push({
+                country: 'Dubai',
+                currency: 'USD',
+                basePrice: parseFloat(String(row.dubaiUsd)) || 0,
+                calculatedPrice: parseFloat(String(row.dubaiUsd)) || 0,
+                exchangeRate: parseFloat(String(row.dubaiXe)) || null,
+                price: parseFloat(String(row.dubaiUsd)) || 0,
+                usd: parseFloat(String(row.dubaiUsd)) || 0,
+                xe: parseFloat(String(row.dubaiXe)) || 0,
+                local: parseFloat(String(row.dubaiAed)) || 0,
+                aed: parseFloat(String(row.dubaiAed)) || 0,
+                margins: [],
+                costs: [],
+                charges: [],
+                paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
+                paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
+              });
+            }
           }
         }
 
@@ -341,6 +402,13 @@ const ProductVariantForm: React.FC = () => {
           return null;
         }
         
+        // Include subSkuFamilyId if available (from SKU Family selection)
+        if (row.subSkuFamilyId && isValidObjectId(row.subSkuFamilyId)) {
+          product.subSkuFamilyId = row.subSkuFamilyId;
+        } else {
+          product.subSkuFamilyId = null;
+        }
+        
         // stock is required by backend
         if (hasPermission('totalQty')) {
           product.stock = parseFloat(String(row.totalQty)) || 0;
@@ -348,9 +416,15 @@ const ProductVariantForm: React.FC = () => {
           product.stock = 0; // Default
         }
         
-        // Only include gradeId if permission exists and value is valid
-        if (hasPermission('grade') && row.grade && isValidObjectId(row.grade)) {
-          product.gradeId = row.grade;
+        // Only include gradeId if permission exists
+        // In edit mode, include even if null to allow clearing the field
+        if (hasPermission('grade')) {
+          if (row.grade && isValidObjectId(row.grade)) {
+            product.gradeId = row.grade;
+          } else if (editId) {
+            // In edit mode, allow null to clear the field
+            product.gradeId = null;
+          }
         }
         
         // Only include specification if permission exists
@@ -358,12 +432,21 @@ const ProductVariantForm: React.FC = () => {
           const spec = cleanString(row.subModelName) || cleanString(row.version) || cleanString((row as any).specification);
           if (spec) {
             product.specification = spec;
+          } else if (editId) {
+            // In edit mode, allow empty to clear the field
+            product.specification = null;
           }
         }
         
         // Only include simType if permission exists
-        if (hasPermission('sim') && row.sim) {
-          product.simType = row.sim;
+        // In edit mode, include even if empty to allow clearing the field
+        if (hasPermission('sim')) {
+          if (row.sim) {
+            product.simType = row.sim;
+          } else if (editId) {
+            // In edit mode, allow null to clear the field
+            product.simType = null;
+          }
         }
         
         // Only include color if permission exists
@@ -401,10 +484,14 @@ const ProductVariantForm: React.FC = () => {
         }
         
         // Only include country if permission exists
+        // In edit mode, include even if null to allow clearing the field
         if (hasPermission('country')) {
           const country = normalizeCountry(cleanString(row.country));
           if (country) {
             product.country = country;
+          } else if (editId) {
+            // In edit mode, allow null to clear the field
+            product.country = null;
           }
         }
         
@@ -634,26 +721,45 @@ const ProductVariantForm: React.FC = () => {
             id: editProduct._id,
           };
           
-          // Helper to safely add field only if permission exists and value is not undefined/null
-          const addFieldIfPermitted = (fieldName: string, value: any, allowZero: boolean = false) => {
+          // Helper to safely add field only if permission exists
+          // For certain fields (country, simType, gradeId), allow null/empty to clear the field
+          const addFieldIfPermitted = (fieldName: string, value: any, allowNull: boolean = false, allowZero: boolean = false) => {
             if (hasPermission(fieldName)) {
-              if (value !== undefined && value !== null && (allowZero || value !== '')) {
-                updatePayload[fieldName] = value;
+              if (value !== undefined) {
+                if (allowNull) {
+                  // Allow null/empty to clear the field
+                  updatePayload[fieldName] = value === '' ? null : value;
+                } else if (value !== null && (allowZero || value !== '')) {
+                  updatePayload[fieldName] = value;
+                }
               }
             }
           };
           
           // Only include fields that seller has permission for
           addFieldIfPermitted('skuFamilyId', productData.skuFamilyId);
-          addFieldIfPermitted('gradeId', productData.gradeId);
+          // subSkuFamilyId should always be included if available
+          if (productData.subSkuFamilyId !== undefined) {
+            updatePayload.subSkuFamilyId = productData.subSkuFamilyId || null;
+          }
+          // gradeId, country, and simType can be null to clear the field
+          if (hasPermission('grade')) {
+            updatePayload.gradeId = productData.gradeId !== undefined ? (productData.gradeId || null) : undefined;
+          }
           addFieldIfPermitted('specification', productData.specification);
-          addFieldIfPermitted('simType', productData.simType);
+          // simType can be null/empty to clear
+          if (hasPermission('sim')) {
+            updatePayload.simType = productData.simType !== undefined ? (productData.simType || null) : undefined;
+          }
           addFieldIfPermitted('color', productData.color);
           addFieldIfPermitted('ram', productData.ram);
           addFieldIfPermitted('storage', productData.storage);
           addFieldIfPermitted('weight', productData.weight);
           addFieldIfPermitted('condition', productData.condition);
-          addFieldIfPermitted('country', productData.country);
+          // country can be null to clear
+          if (hasPermission('country')) {
+            updatePayload.country = productData.country !== undefined ? (productData.country || null) : undefined;
+          }
           // stock is required by backend - always include it
           if (hasPermission('totalQty')) {
             updatePayload.stock = productData.stock !== undefined ? productData.stock : 0;
@@ -717,26 +823,45 @@ const ProductVariantForm: React.FC = () => {
                 id: editProd._id,
               };
               
-              // Helper to safely add field only if permission exists and value is not undefined/null
-              const addFieldIfPermitted = (fieldName: string, value: any, allowZero: boolean = false) => {
+              // Helper to safely add field only if permission exists
+              // For certain fields (country, simType, gradeId), allow null/empty to clear the field
+              const addFieldIfPermitted = (fieldName: string, value: any, allowNull: boolean = false, allowZero: boolean = false) => {
                 if (hasPermission(fieldName)) {
-                  if (value !== undefined && value !== null && (allowZero || value !== '')) {
-                    updatePayload[fieldName] = value;
+                  if (value !== undefined) {
+                    if (allowNull) {
+                      // Allow null/empty to clear the field
+                      updatePayload[fieldName] = value === '' ? null : value;
+                    } else if (value !== null && (allowZero || value !== '')) {
+                      updatePayload[fieldName] = value;
+                    }
                   }
                 }
               };
               
               // Only include fields that seller has permission for
               addFieldIfPermitted('skuFamilyId', productData.skuFamilyId);
-              addFieldIfPermitted('gradeId', productData.gradeId);
+              // subSkuFamilyId should always be included if available
+              if (productData.subSkuFamilyId !== undefined) {
+                updatePayload.subSkuFamilyId = productData.subSkuFamilyId || null;
+              }
+              // gradeId, country, and simType can be null to clear the field
+              if (hasPermission('grade')) {
+                updatePayload.gradeId = productData.gradeId !== undefined ? (productData.gradeId || null) : undefined;
+              }
               addFieldIfPermitted('specification', productData.specification);
-              addFieldIfPermitted('simType', productData.simType);
+              // simType can be null/empty to clear
+              if (hasPermission('sim')) {
+                updatePayload.simType = productData.simType !== undefined ? (productData.simType || null) : undefined;
+              }
               addFieldIfPermitted('color', productData.color);
               addFieldIfPermitted('ram', productData.ram);
               addFieldIfPermitted('storage', productData.storage);
               addFieldIfPermitted('weight', productData.weight);
               addFieldIfPermitted('condition', productData.condition);
-              addFieldIfPermitted('country', productData.country);
+              // country can be null to clear
+              if (hasPermission('country')) {
+                updatePayload.country = productData.country !== undefined ? (productData.country || null) : undefined;
+              }
               // stock is required by backend - always include it
               if (hasPermission('totalQty')) {
                 updatePayload.stock = productData.stock !== undefined ? productData.stock : 0;

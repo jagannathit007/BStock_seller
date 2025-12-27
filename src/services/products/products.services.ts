@@ -29,6 +29,7 @@ export interface UpdateProductRequest {
   specification?: string;
   skuFamilyId?: string;
   subSkuFamilyId?: string;
+  gradeId?: string;
   simType?: string;
   color?: string;
   ram?: string;
@@ -172,6 +173,9 @@ export class ProductService {
       }
       if (payload.subSkuFamilyId !== undefined) {
         processedPayload.subSkuFamilyId = payload.subSkuFamilyId;
+      }
+      if (payload.gradeId !== undefined) {
+        processedPayload.gradeId = payload.gradeId;
       }
       if (payload.specification !== undefined) {
         processedPayload.specification = payload.specification;
@@ -446,10 +450,10 @@ export class ProductService {
   };
 
   // Get next customer listing number
-  static getNextCustomerListingNumber = async (): Promise<any> => {
+  static getNextCustomerListingNumber = async (isMultiVariant: boolean = false): Promise<any> => {
     const url = `${env.baseUrl}/api/seller/product/get-next-customer-listing-number`;
     try {
-      const res = await api.post(url, {});
+      const res = await api.post(url, { isMultiVariant });
       return res.data;
     } catch (err: any) {
       const errorMessage = err.response?.data?.message || 'Failed to get next customer listing number';
@@ -480,6 +484,24 @@ export class ProductService {
     } catch (err: any) {
       const errorMessage = err.response?.data?.message || 'Failed to get next supplier listing number';
       console.error(errorMessage);
+      throw new Error(errorMessage);
+    }
+  };
+
+  // Update product images and videos
+  static updateProductImagesVideos = async (_id: string, formData: FormData): Promise<any> => {
+    const url = `${env.baseUrl}/api/seller/product/update-images-videos`;
+    try {
+      const res = await api.post(url, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      toastHelper.showTost(res.data.message || 'Product images and videos updated successfully!', 'success');
+      return res.data;
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.message || 'Failed to update product images and videos';
+      toastHelper.showTost(errorMessage, 'error');
       throw new Error(errorMessage);
     }
   };

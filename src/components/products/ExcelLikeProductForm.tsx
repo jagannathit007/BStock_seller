@@ -71,6 +71,7 @@ export interface ProductRowData {
   supplierListingNumber: string;
   customerListingNumber: string;
   skuFamilyId: string;
+  subSkuFamilyId?: string | null; // Sub SKU Family ID from skuFamily.subSkuFamilies array
   ram?: string;
   sequence?: number;
   images?: string[];
@@ -257,6 +258,14 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           }
         }
         
+        // Get subSkuFamilyId from product
+        let subSkuFamilyId: string | null = null;
+        if ((product as any).subSkuFamilyId) {
+          subSkuFamilyId = typeof (product as any).subSkuFamilyId === 'object' 
+            ? ((product as any).subSkuFamilyId._id || null)
+            : (product as any).subSkuFamilyId;
+        }
+        
         return {
           subModelName: subModelName,
           storage: product.storage || '',
@@ -306,6 +315,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           endTime: product.expiryTime || '',
           remark: (product as any).remark || '',
           supplierId: (product as any).sellerId ? (typeof (product as any).sellerId === 'object' ? (product as any).sellerId._id : (product as any).sellerId) : '',
+          subSkuFamilyId: subSkuFamilyId,
           supplierListingNumber: (product as any).supplierListingNumber || '',
           customerListingNumber: (product as any).customerListingNumber || '',
           skuFamilyId: typeof product.skuFamilyId === 'object' ? product.skuFamilyId._id : product.skuFamilyId,
@@ -557,6 +567,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     supplierListingNumber: '',
     customerListingNumber: '',
     skuFamilyId: variant?.skuFamilyId || '',
+    subSkuFamilyId: (variant as any)?.subSkuFamilyId || null,
     ram: variant?.ram,
     sequence: index + 1,
     // Initialize custom fields
@@ -594,10 +605,12 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         const constantsData = await ConstantsService.getConstants();
         setConstants(constantsData);
         
-        // Fetch next customer listing number
+        // Fetch next customer listing number WITH multi-variant support
         try {
-          const customerListingData = await ProductService.getNextCustomerListingNumber();
-          setCurrentCustomerListingNumber(customerListingData.data?.listingNumber || 1);
+          const customerListingData = await ProductService.getNextCustomerListingNumber(
+            variantType === 'multi'  // Send true for multi-variant
+          );
+          setCurrentCustomerListingNumber(customerListingData.data?.listingNumber || customerListingData.listingNumber || 1);
         } catch (error) {
           console.error('Error fetching customer listing number:', error);
           // Default to 1 if fetch fails
@@ -691,6 +704,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
             skuFamilyId: skuFamily._id,
             skuFamilyName: skuFamily.name,
             subModelName: subSku.subName || skuFamily.name,
+            subSkuFamilyId: subSku._id || null,
             storage: subSku.storageId?.title || '',
             storageId: subSku.storageId?._id || null,
             colour: subSku.colorId?.title || '',
@@ -738,6 +752,13 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
   const handleRowSkuFamilySearchSelect = (option: any, rowIndex: number) => {
     // Update SKU Family ID
     updateRow(rowIndex, 'skuFamilyId', option.skuFamilyId);
+    
+    // Update subSkuFamilyId if available
+    if (option.subSkuFamilyId) {
+      updateRow(rowIndex, 'subSkuFamilyId', option.subSkuFamilyId);
+    } else {
+      updateRow(rowIndex, 'subSkuFamilyId', null);
+    }
     
     // Auto-fill related fields from selected SKU Family (matching admin panel behavior)
     updateRow(rowIndex, 'subModelName', option.subModelName || '');
@@ -806,15 +827,22 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     if (currentCustomerListingNumber !== null && rows.length > 0) {
       setRows(prevRows => prevRows.map((row, index) => {
         const updatedRow = { ...row };
-        const productNumber = index + 1;
-        const customerListingNo = `L${currentCustomerListingNumber}-${productNumber}`;
+        let prefix = `L${currentCustomerListingNumber}`;
+        
+        // Add M1 suffix for multi-variant (same as admin panel)
+        if (variantType === 'multi') {
+          prefix = `L${currentCustomerListingNumber}M1`;
+        }
+        
+        const customerListingNo = `${prefix}-${index + 1}`;
+        
         if (!updatedRow.customerListingNumber || updatedRow.customerListingNumber !== customerListingNo) {
           updatedRow.customerListingNumber = customerListingNo;
         }
         return updatedRow;
       }));
     }
-  }, [rows.length, currentCustomerListingNumber]);
+  }, [rows.length, currentCustomerListingNumber, variantType]);
 
   // Auto-generate unique listing numbers when rows change
   useEffect(() => {
@@ -1156,6 +1184,13 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           return null;
         }
         
+        // Include subSkuFamilyId if available (from SKU Family selection)
+        if (row.subSkuFamilyId && /^[0-9a-fA-F]{24}$/.test(row.subSkuFamilyId)) {
+          product.subSkuFamilyId = row.subSkuFamilyId;
+        } else {
+          product.subSkuFamilyId = null;
+        }
+        
         // stock is required by backend
         if (hasPermission('totalQty')) {
           product.stock = parseFloat(String(row.totalQty)) || 0;
@@ -1187,6 +1222,14 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           const color = normalizeColor(row.colour);
           if (color) {
             product.color = color;
+          }
+        }
+        
+        // Only include ram if permission exists
+        if (hasPermission('ram')) {
+          const ram = cleanString(row.ram);
+          if (ram) {
+            product.ram = ram;
           }
         }
         
@@ -1696,22 +1739,41 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
 
       case 'subModelName':
       case 'storage':
-      case 'colour':
+      case 'colour': {
+        const isDisabledForSku = !!row.skuFamilyId; // Disable if SKU Family is selected
         return (
           <input
             ref={(el) => { cellRefs.current[cellId] = el; }}
             type="text"
             value={value as string}
-            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
-            className="w-full px-2 py-1.5 text-xs border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 placeholder:text-gray-400"
-            required={column.key === 'subModelName' || column.key === 'storage' || column.key === 'colour'}
-            onFocus={() => {
-              setFocusedCell({ row: rowIndex, col: column.key });
-              setSelectedRowIndex(rowIndex);
+            onChange={(e) => {
+              // Only allow change if not disabled (i.e., no skuFamilyId yet)
+              if (!isDisabledForSku) {
+                updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value);
+              }
             }}
-            placeholder="Enter value or use search"
+            className={`w-full px-2 py-1.5 text-xs border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 placeholder:text-gray-400 ${
+              isDisabledForSku 
+                ? 'text-gray-600 dark:text-gray-400 italic cursor-not-allowed bg-gray-100 dark:bg-gray-800' 
+                : ''
+            }`}
+            required={column.key === 'subModelName' || column.key === 'storage' || column.key === 'colour'}
+            disabled={isDisabledForSku}
+            readOnly={isDisabledForSku} // Optional: extra safety
+            onFocus={() => {
+              if (!isDisabledForSku) {
+                setFocusedCell({ row: rowIndex, col: column.key });
+                setSelectedRowIndex(rowIndex);
+              }
+            }}
+            placeholder={
+              isDisabledForSku 
+                ? 'Auto-filled from SKU Family' 
+                : 'Enter value or use SKU Family search'
+            }
           />
         );
+      }
 
       case 'country':
         return (
@@ -1832,16 +1894,16 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         );
 
       case 'lockUnlock':
-      case 'negotiableFixed':
+      case 'negotiableFixed': {
         const options = column.key === 'lockUnlock' ? lockUnlockOptions : negotiableFixedOptions;
         const fieldValue = column.key === 'negotiableFixed' ? groupDisplayValue : value;
-        const isDisabled = column.key === 'negotiableFixed' && isGroupLevelField && !isMasterRow;
+        const isDisabledForGroup = column.key === 'negotiableFixed' && isGroupLevelField && !isMasterRow;
         return (
           <select
             value={fieldValue as string}
             onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
             className="w-full px-2 py-1 text-xs border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-500"
-            disabled={isDisabled}
+            disabled={isDisabledForGroup}
             required={column.key === 'lockUnlock'}
             onFocus={() => {
               setFocusedCell({ row: rowIndex, col: column.key });
@@ -1856,6 +1918,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
             ))}
           </select>
         );
+      }
 
       case 'packing':
         return (

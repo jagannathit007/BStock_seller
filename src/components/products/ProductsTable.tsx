@@ -6,6 +6,7 @@ import toastHelper from "../../utils/toastHelper";
 import UploadExcelModal from "./UploadExcelModal";
 import ProductModal from "./ProductsModal";
 import VariantSelectionModal from "./VariantSelectionModal";
+import ProductImageVideoModal from "./ProductImageVideoModal";
 import { ProductService } from "../../services/products/products.services";
 
 interface Product {
@@ -42,6 +43,9 @@ interface Product {
   canVerify: boolean;
   canApprove: boolean;
   purchaseType: string;
+  groupCode?: string; // For multi-variant products
+  images?: string[]; // Product images
+  videos?: string[]; // Product videos
 }
 
 const ProductsTable: React.FC = () => {
@@ -58,6 +62,8 @@ const ProductsTable: React.FC = () => {
   const [totalPages, setTotalPages] = useState<number>(1);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showVariantSelectionModal, setShowVariantSelectionModal] = useState<boolean>(false);
+  const [isImageVideoModalOpen, setIsImageVideoModalOpen] = useState<boolean>(false);
+  const [selectedProductForImages, setSelectedProductForImages] = useState<Product | null>(null);
   const itemsPerPage = 10;
 
   // Fetch products on component mount and when page/search changes
@@ -225,8 +231,18 @@ const ProductsTable: React.FC = () => {
     setSelectedProduct(product);
   };
 
-  const getProductImageSrc = (): string => {
-    return "https://via.placeholder.com/60x60?text=Product";
+  const getProductImageSrc = (product?: Product): string => {
+    if (product?.images && Array.isArray(product.images) && product.images.length > 0) {
+      const firstImage = product.images[0];
+      if (firstImage && String(firstImage).trim() !== '') {
+        const base = (import.meta as { env?: { VITE_BASE_URL?: string } }).env?.VITE_BASE_URL || '';
+        const isAbsolute = /^https?:\/\//i.test(firstImage);
+        return isAbsolute
+          ? firstImage
+          : `${base}${firstImage.startsWith("/") ? "" : "/"}${firstImage}`;
+      }
+    }
+    return placeholderImage;
   };
 
   const formatPrice = (price: number | string | undefined | null): string => {
@@ -260,6 +276,10 @@ const ProductsTable: React.FC = () => {
     } catch {
       return "-";
     }
+  };
+
+  const isMultiVariant = (product: Product): boolean => {
+    return Boolean(product.groupCode);
   };
 
   const getStatusBadge = (product: Product) => {
@@ -406,26 +426,49 @@ const ProductsTable: React.FC = () => {
                 </tr>
               ) : (
                 (Array.isArray(productsData) ? productsData : []).map(
-                  (item: Product, index: number) => (
+                  (item: Product, index: number) => {
+                    const isMulti = isMultiVariant(item);
+                    return (
                     <tr
                       key={item._id || item.id || index}
-                      className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      className={`transition-colors ${
+                        isMulti
+                          ? 'bg-purple-50 dark:bg-purple-900/20 border-l-4 border-l-purple-500 hover:bg-purple-100 dark:hover:bg-purple-900/30'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                      }`}
                     >
                       <td className="px-6 py-4">
                         <img
-                          src={getProductImageSrc()}
+                          src={getProductImageSrc(item)}
                           alt={item.specification || "Product"}
-                          className="w-12 h-12 object-contain rounded-md border border-gray-200 dark:border-gray-600"
+                          className="w-12 h-12 object-cover rounded-md border border-gray-200 dark:border-gray-600 cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => {
+                            setSelectedProductForImages(item);
+                            setIsImageVideoModalOpen(true);
+                          }}
                           onError={(e) => {
                             (e.currentTarget as HTMLImageElement).src =
                               placeholderImage;
                           }}
+                          title="Click to manage images and videos"
                         />
                       </td>
                       <td className="px-6 py-4 text-sm font-medium text-gray-800 dark:text-gray-200">
-                        {typeof item.skuFamilyId === "object" && item.skuFamilyId !== null 
-                          ? item.skuFamilyId.name || item.name || "-"
-                          : item.name || "-"}
+                        <div className="flex items-center gap-2">
+                          <span>
+                            {typeof item.skuFamilyId === "object" && item.skuFamilyId !== null 
+                              ? item.skuFamilyId.name || item.name || "-"
+                              : item.name || "-"}
+                          </span>
+                          {isMulti && (
+                            <span
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-100 text-purple-700 border border-purple-200 dark:bg-purple-900/50 dark:text-purple-300 dark:border-purple-700"
+                              title={`Multi-variant group: ${item.groupCode || ''}`}
+                            >
+                              MV
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                         {item.specification || "-"}
@@ -488,7 +531,8 @@ const ProductsTable: React.FC = () => {
                         </div>
                       </td>
                     </tr>
-                  )
+                    );
+                  }
                 )
               )}
             </tbody>
@@ -570,9 +614,9 @@ const ProductsTable: React.FC = () => {
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
               <div className="flex items-center space-x-4">
                 <img
-                  src={getProductImageSrc()}
+                  src={getProductImageSrc(selectedProduct)}
                   alt={selectedProduct.name}
-                  className="w-16 h-16 object-contain rounded-lg border border-gray-200 dark:border-gray-600 flex-shrink-0"
+                  className="w-16 h-16 object-cover rounded-lg border border-gray-200 dark:border-gray-600 flex-shrink-0"
                   onError={(e) => {
                     (e.currentTarget as HTMLImageElement).src =
                       placeholderImage;
@@ -770,6 +814,21 @@ const ProductsTable: React.FC = () => {
         isOpen={showVariantSelectionModal}
         onClose={() => setShowVariantSelectionModal(false)}
       />
+
+      {/* Product Image/Video Modal */}
+      {selectedProductForImages && (
+        <ProductImageVideoModal
+          isOpen={isImageVideoModalOpen}
+          onClose={() => {
+            setIsImageVideoModalOpen(false);
+            setSelectedProductForImages(null);
+          }}
+          product={selectedProductForImages}
+          onUpdate={() => {
+            fetchProducts();
+          }}
+        />
+      )}
     </div>
   );
 };
