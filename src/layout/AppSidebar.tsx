@@ -25,11 +25,11 @@ const navItems: NavItem[] = [
     name: "Products",
     path: "/products",
   },
-  {
-    icon: <i className="fa-solid fa-list-check"></i>,
-    name: "Activities",
-    path: "/activities",
-  },
+  // {
+  //   icon: <i className="fa-solid fa-list-check"></i>,
+  //   name: "Activities",
+  //   path: "/activities",
+  // },
 ];
 
 const AppSidebar: React.FC = () => {
