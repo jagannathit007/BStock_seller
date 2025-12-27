@@ -257,6 +257,42 @@ const ProductVariantForm: React.FC = () => {
       }
       
       // Transform rows to backend format - ONLY include fields with permission
+      // Helper to normalize paymentTerm to a single valid value (backend only accepts single values)
+      // Maps codes to full text values that the validator expects
+      const normalizePaymentTerm = (val: string | null | undefined): string | null => {
+        if (!val || val === '' || (typeof val === 'string' && val.trim() === '')) return null;
+        const trimmed = val.trim();
+        // If comma-separated, take the first value
+        const firstValue = trimmed.split(',')[0].trim();
+        
+        // Map common codes to full text values (validator expects full text)
+        const codeToTextMap: Record<string, string> = {
+          'USD_O': 'on order',
+          'USD_D': 'on delivery',
+          'AED_O': 'on order',
+          'AED_D': 'on delivery',
+          'HKD_O': 'on order',
+          'HKD_D': 'on delivery',
+          'USD_CONF': 'as in conformation',
+          'AED_CONF': 'as in conformation',
+          'HKD_CONF': 'as in conformation',
+          'ON_ORDER': 'on order',
+          'ON_DELIVERY': 'on delivery',
+          'AS_IN_CONFORMATION': 'as in conformation',
+        };
+        
+        // Check if it's a code and map it
+        if (codeToTextMap[firstValue]) {
+          return codeToTextMap[firstValue];
+        }
+        
+        // Validate against allowed full text values (case-insensitive)
+        const allowedValues = ['on order', 'on delivery', 'as in conformation'];
+        const lowerFirst = firstValue.toLowerCase();
+        const matched = allowedValues.find(v => v.toLowerCase() === lowerFirst);
+        return matched || null;
+      };
+      
       const productsToCreate = rows.map((row, rowIndex) => {
         // Helper to convert empty strings to null
         const cleanString = (val: string | null | undefined): string | null => {
@@ -319,7 +355,7 @@ const ProductVariantForm: React.FC = () => {
                 margins: cd.margins || [],
                 costs: cd.costs || [],
                 charges: cd.charges || [],
-                paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || cd.paymentTerm || null) : (cd.paymentTerm || null),
+                paymentTerm: hasPermission('paymentTerm') ? (normalizePaymentTerm(row.paymentTerm) || normalizePaymentTerm(cd.paymentTerm) || null) : (normalizePaymentTerm(cd.paymentTerm) || null),
                 paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || cd.paymentMethod || null) : (cd.paymentMethod || null),
               };
             } else if (cd.country === 'Dubai' && (hasPermission('dubaiUsd') || hasPermission('dubaiAed'))) {
@@ -337,7 +373,7 @@ const ProductVariantForm: React.FC = () => {
                 margins: cd.margins || [],
                 costs: cd.costs || [],
                 charges: cd.charges || [],
-                paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || cd.paymentTerm || null) : (cd.paymentTerm || null),
+                paymentTerm: hasPermission('paymentTerm') ? (normalizePaymentTerm(row.paymentTerm) || normalizePaymentTerm(cd.paymentTerm) || null) : (normalizePaymentTerm(cd.paymentTerm) || null),
                 paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || cd.paymentMethod || null) : (cd.paymentMethod || null),
               };
             }
@@ -362,7 +398,7 @@ const ProductVariantForm: React.FC = () => {
                 margins: [],
                 costs: [],
                 charges: [],
-                paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
+                paymentTerm: hasPermission('paymentTerm') ? normalizePaymentTerm(row.paymentTerm) : null,
                 paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
               });
             }
@@ -384,7 +420,7 @@ const ProductVariantForm: React.FC = () => {
                 margins: [],
                 costs: [],
                 charges: [],
-                paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
+                paymentTerm: hasPermission('paymentTerm') ? normalizePaymentTerm(row.paymentTerm) : null,
                 paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
               });
             }
@@ -779,6 +815,15 @@ const ProductVariantForm: React.FC = () => {
           }
           if (hasPermission('flashDeal')) {
             updatePayload.isFlashDeal = productData.isFlashDeal !== undefined ? productData.isFlashDeal : 'false';
+            // If isFlashDeal is true, ensure expiryTime is included (required by backend)
+            if (updatePayload.isFlashDeal === true || updatePayload.isFlashDeal === 'true') {
+              if (productData.expiryTime !== undefined) {
+                updatePayload.expiryTime = productData.expiryTime;
+              } else if (editProduct?.expiryTime) {
+                // Preserve existing expiryTime if not provided
+                updatePayload.expiryTime = editProduct.expiryTime;
+              }
+            }
           }
           addFieldIfPermitted('startTime', productData.startTime);
           addFieldIfPermitted('expiryTime', productData.expiryTime);
@@ -807,7 +852,15 @@ const ProductVariantForm: React.FC = () => {
           // Include countryDeliverables if seller has permission for price fields
           if ((hasPermission('hkUsd') || hasPermission('hkHkd') || hasPermission('dubaiUsd') || hasPermission('dubaiAed')) 
               && productData.countryDeliverables && productData.countryDeliverables.length > 0) {
-            updatePayload.countryDeliverables = productData.countryDeliverables;
+            // Remove _id fields from countryDeliverables (not allowed by backend validator)
+            // Also normalize paymentTerm values
+            updatePayload.countryDeliverables = productData.countryDeliverables.map((cd: any) => {
+              const { _id: _, paymentTerm, ...rest } = cd;
+              return {
+                ...rest,
+                paymentTerm: normalizePaymentTerm(paymentTerm),
+              };
+            });
             // Also include price for legacy support
             updatePayload.price = productData.price !== undefined ? productData.price : 0;
           }
@@ -881,6 +934,15 @@ const ProductVariantForm: React.FC = () => {
               }
               if (hasPermission('flashDeal')) {
                 updatePayload.isFlashDeal = productData.isFlashDeal !== undefined ? productData.isFlashDeal : 'false';
+                // If isFlashDeal is true, ensure expiryTime is included (required by backend)
+                if (updatePayload.isFlashDeal === true || updatePayload.isFlashDeal === 'true') {
+                  if (productData.expiryTime !== undefined) {
+                    updatePayload.expiryTime = productData.expiryTime;
+                  } else if (editProd?.expiryTime) {
+                    // Preserve existing expiryTime if not provided
+                    updatePayload.expiryTime = editProd.expiryTime;
+                  }
+                }
               }
               addFieldIfPermitted('startTime', productData.startTime);
               addFieldIfPermitted('expiryTime', productData.expiryTime);
@@ -909,7 +971,15 @@ const ProductVariantForm: React.FC = () => {
               // Include countryDeliverables if seller has permission for price fields
               if ((hasPermission('hkUsd') || hasPermission('hkHkd') || hasPermission('dubaiUsd') || hasPermission('dubaiAed')) 
                   && productData.countryDeliverables && productData.countryDeliverables.length > 0) {
-                updatePayload.countryDeliverables = productData.countryDeliverables;
+                // Remove _id fields from countryDeliverables (not allowed by backend validator)
+                // Also normalize paymentTerm values
+                updatePayload.countryDeliverables = productData.countryDeliverables.map((cd: any) => {
+                  const { _id: _, paymentTerm, ...rest } = cd;
+                  return {
+                    ...rest,
+                    paymentTerm: normalizePaymentTerm(paymentTerm),
+                  };
+                });
                 updatePayload.price = productData.price !== undefined ? productData.price : 0;
               }
               

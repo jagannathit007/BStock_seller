@@ -285,7 +285,11 @@ export class ProductService {
       
       // Include countryDeliverables if provided (for price updates)
       if (payload.countryDeliverables && Array.isArray(payload.countryDeliverables) && payload.countryDeliverables.length > 0) {
-        processedPayload.countryDeliverables = payload.countryDeliverables;
+        // Remove _id fields from countryDeliverables (not allowed by backend validator)
+        processedPayload.countryDeliverables = payload.countryDeliverables.map((cd: any) => {
+          const { _id: _, ...rest } = cd;
+          return rest;
+        });
       }
       
       const res = await api.post(url, processedPayload);

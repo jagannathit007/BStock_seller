@@ -213,13 +213,35 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         let countryCode = '';
         if (product.country) {
           const countryUpper = product.country.toUpperCase().trim();
-          if (countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG' || countryUpper === 'HK') {
-            countryCode = 'HK';
-          } else if (countryUpper === 'DUBAI' || countryUpper === 'D' || countryUpper === 'UAE') {
-            countryCode = 'D';
+          // Try to find matching country code from constants first
+          if (constants?.spec?.COUNTRY && Array.isArray(constants.spec.COUNTRY)) {
+            const matchingCountry = constants.spec.COUNTRY.find((c: any) => 
+              c.name?.toUpperCase() === countryUpper || 
+              c.code?.toUpperCase() === countryUpper ||
+              countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG' || countryUpper === 'HK'
+            );
+            if (matchingCountry) {
+              countryCode = matchingCountry.code;
+            } else {
+              // Fallback to common mappings
+              if (countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG' || countryUpper === 'HK') {
+                countryCode = 'HK';
+              } else if (countryUpper === 'DUBAI' || countryUpper === 'D' || countryUpper === 'UAE') {
+                countryCode = 'D';
+              } else {
+                // If it's already a code, use it as is
+                countryCode = product.country;
+              }
+            }
           } else {
-            // If it's already a code, use it as is
-            countryCode = product.country;
+            // Fallback if constants not loaded yet
+            if (countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG' || countryUpper === 'HK') {
+              countryCode = 'HK';
+            } else if (countryUpper === 'DUBAI' || countryUpper === 'D' || countryUpper === 'UAE') {
+              countryCode = 'D';
+            } else {
+              countryCode = product.country;
+            }
           }
         }
         
@@ -246,16 +268,160 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         // Normalize SIM type to match dropdown values
         let simValue = '';
         if (product.simType) {
-          const simUpper = product.simType.toUpperCase().trim();
-          // Common SIM type mappings
-          if (simUpper.includes('DUAL') || simUpper === 'DUAL SIM') {
-            simValue = 'DUAL SIM';
-          } else if (simUpper.includes('SINGLE') || simUpper === 'SINGLE SIM') {
-            simValue = 'SINGLE SIM';
+          // Get available SIM options for the selected country
+          const availableSimOptions = countryCode && constants?.spec?.COUNTRY
+            ? (constants.spec.COUNTRY.find((c: any) => c.code === countryCode)?.SIM || [])
+            : [];
+          
+          // Try to find exact match first
+          const exactMatch = availableSimOptions.find((opt: string) => 
+            opt.toUpperCase() === product.simType.toUpperCase()
+          );
+          
+          if (exactMatch) {
+            simValue = exactMatch;
           } else {
-            // Use as is if it matches a known format
-            simValue = product.simType;
+            // Try common mappings
+            const simUpper = product.simType.toUpperCase().trim();
+            if (simUpper.includes('DUAL') || simUpper === 'DUAL SIM') {
+              // Find DUAL SIM option
+              const dualMatch = availableSimOptions.find((opt: string) => 
+                opt.toUpperCase().includes('DUAL')
+              );
+              simValue = dualMatch || 'DUAL SIM';
+            } else if (simUpper.includes('SINGLE') || simUpper === 'SINGLE SIM') {
+              // Find SINGLE SIM option
+              const singleMatch = availableSimOptions.find((opt: string) => 
+                opt.toUpperCase().includes('SINGLE')
+              );
+              simValue = singleMatch || 'SINGLE SIM';
+            } else {
+              // Use as is if it matches a known format
+              simValue = product.simType;
+            }
           }
+        }
+        
+        // Get paymentTerm and paymentMethod from countryDeliverables or product
+        // PaymentTerm might be stored in countryDeliverables[].paymentTerm as full text
+        // Need to convert to codes for the dropdown
+        let paymentTermValue = '';
+        const getPaymentTermCodes = (paymentTerm: any): string => {
+          if (!paymentTerm) return '';
+          
+          // If it's an array, process each item
+          const terms = Array.isArray(paymentTerm) ? paymentTerm : [paymentTerm];
+          const codes: string[] = [];
+          
+          terms.forEach((term: any) => {
+            if (!term) return;
+            const termStr = String(term).trim();
+            if (!termStr) return;
+            
+            // Try to find matching code from paymentTermOptions (access via constants)
+            const paymentTermOpts = constants?.paymentTerm || [];
+            if (paymentTermOpts && paymentTermOpts.length > 0) {
+              // First try exact match by name (case-insensitive)
+              const matchByName = paymentTermOpts.find((opt: any) => 
+                opt.name?.toLowerCase() === termStr.toLowerCase()
+              );
+              if (matchByName) {
+                codes.push(matchByName.code);
+                return;
+              }
+              
+              // Try match by code
+              const matchByCode = paymentTermOpts.find((opt: any) => 
+                opt.code === termStr
+              );
+              if (matchByCode) {
+                codes.push(matchByCode.code);
+                return;
+              }
+              
+              // Try to map common full text values to codes
+              const textToCodeMap: Record<string, string> = {
+                'on order': 'USD_O',
+                'on delivery': 'USD_D',
+                'as in conformation': 'USD_CONF',
+              };
+              
+              const lowerTerm = termStr.toLowerCase();
+              if (textToCodeMap[lowerTerm]) {
+                // Find if this code exists in options
+                const codeExists = paymentTermOpts.find((opt: any) => 
+                  opt.code === textToCodeMap[lowerTerm]
+                );
+                if (codeExists) {
+                  codes.push(codeExists.code);
+                  return;
+                }
+              }
+            }
+            
+            // If no match found, use as is (might already be a code)
+            codes.push(termStr);
+          });
+          
+          return codes.join(', ');
+        };
+        
+        if ((product as any).paymentTerm) {
+          paymentTermValue = getPaymentTermCodes((product as any).paymentTerm);
+        } else if (hkDeliverable?.paymentTerm || dubaiDeliverable?.paymentTerm) {
+          // Get from first available countryDeliverable
+          const deliverablePaymentTerm = hkDeliverable?.paymentTerm || dubaiDeliverable?.paymentTerm;
+          paymentTermValue = getPaymentTermCodes(deliverablePaymentTerm);
+        }
+        
+        let paymentMethodValue = '';
+        const getPaymentMethodCodes = (paymentMethod: any): string => {
+          if (!paymentMethod) return '';
+          
+          // If it's an array, process each item
+          const methods = Array.isArray(paymentMethod) ? paymentMethod : [paymentMethod];
+          const codes: string[] = [];
+          
+          methods.forEach((method: any) => {
+            if (!method) return;
+            const methodStr = String(method).trim();
+            if (!methodStr) return;
+            
+            // Try to find matching code from paymentMethodOptions (access via constants)
+            const paymentMethodOpts = constants?.paymentMethod || [];
+            if (paymentMethodOpts && paymentMethodOpts.length > 0) {
+              // First try exact match by name (case-insensitive)
+              const matchByName = paymentMethodOpts.find((opt: any) => 
+                opt.name?.toLowerCase() === methodStr.toLowerCase()
+              );
+              if (matchByName) {
+                codes.push(matchByName.code);
+                return;
+              }
+              
+              // Try match by code
+              const matchByCode = paymentMethodOpts.find((opt: any) => 
+                opt.code === methodStr
+              );
+              if (matchByCode) {
+                codes.push(matchByCode.code);
+                return;
+              }
+            }
+            
+            // If no match found, use as is (might already be a code)
+            codes.push(methodStr);
+          });
+          
+          return codes.join(', ');
+        };
+        
+        if ((product as any).paymentMethod) {
+          paymentMethodValue = getPaymentMethodCodes((product as any).paymentMethod);
+        } else if (hkDeliverable?.paymentMethod || dubaiDeliverable?.paymentMethod) {
+          // Get from first available countryDeliverable
+          const deliverablePaymentMethod = hkDeliverable?.paymentMethod || dubaiDeliverable?.paymentMethod;
+          paymentMethodValue = getPaymentMethodCodes(deliverablePaymentMethod);
         }
         
         // Get subSkuFamilyId from product
@@ -295,12 +461,8 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           moqPerVariant: product.moq || 0,
           weight: (product as any).weight || '',
           purchaseType: (product as any).purchaseType || 'partial',
-          paymentTerm: Array.isArray((product as any).paymentTerm) 
-            ? (product as any).paymentTerm 
-            : [],
-          paymentMethod: Array.isArray((product as any).paymentMethod)
-            ? (product as any).paymentMethod
-            : [],
+          paymentTerm: paymentTermValue,
+          paymentMethod: paymentMethodValue,
           negotiableFixed: product.isNegotiable ? '1' : '0',
           tags: (product as any).tags || '',
           flashDeal: (product as any).isFlashDeal === 'true' || (product as any).isFlashDeal === true ? '1' : '0',
@@ -1111,6 +1273,56 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           return val;
         };
         
+        // Normalize paymentTerm to a single valid value (backend only accepts single values)
+        // Maps codes to full text values that the validator expects
+        const normalizePaymentTerm = (val: string | null | undefined): string | null => {
+          if (!val || val === '' || (typeof val === 'string' && val.trim() === '')) return null;
+          const trimmed = val.trim();
+          // If comma-separated, take the first value
+          const firstValue = trimmed.split(',')[0].trim();
+          
+          // Try to find the paymentTerm option by code and use its name
+          if (paymentTermOptions && paymentTermOptions.length > 0) {
+            const option = paymentTermOptions.find(opt => opt.code === firstValue);
+            if (option && option.name) {
+              // Validate that the name matches allowed values
+              const allowedValues = ['on order', 'on delivery', 'as in conformation'];
+              const lowerName = option.name.toLowerCase();
+              const matched = allowedValues.find(v => v.toLowerCase() === lowerName);
+              if (matched) {
+                return matched;
+              }
+            }
+          }
+          
+          // Map common codes to full text values (validator expects full text)
+          const codeToTextMap: Record<string, string> = {
+            'USD_O': 'on order',
+            'USD_D': 'on delivery',
+            'AED_O': 'on order',
+            'AED_D': 'on delivery',
+            'HKD_O': 'on order',
+            'HKD_D': 'on delivery',
+            'USD_CONF': 'as in conformation',
+            'AED_CONF': 'as in conformation',
+            'HKD_CONF': 'as in conformation',
+            'ON_ORDER': 'on order',
+            'ON_DELIVERY': 'on delivery',
+            'AS_IN_CONFORMATION': 'as in conformation',
+          };
+          
+          // Check if it's a code and map it
+          if (codeToTextMap[firstValue]) {
+            return codeToTextMap[firstValue];
+          }
+          
+          // Validate against allowed full text values (case-insensitive)
+          const allowedValues = ['on order', 'on delivery', 'as in conformation'];
+          const lowerFirst = firstValue.toLowerCase();
+          const matched = allowedValues.find(v => v.toLowerCase() === lowerFirst);
+          return matched || null;
+        };
+        
         // Helper to normalize color to match enum values
         const normalizeColor = (color: string | null | undefined): string | null => {
           if (!color) return null;
@@ -1154,7 +1366,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
               xe: parseFloat(String(row.hkXe)) || 0,
               local: parseFloat(String(row.hkHkd)) || 0,
               hkd: parseFloat(String(row.hkHkd)) || 0,
-              paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
+              paymentTerm: hasPermission('paymentTerm') ? normalizePaymentTerm(row.paymentTerm) : null,
               paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
             });
           }
@@ -1172,7 +1384,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
               xe: parseFloat(String(row.dubaiXe)) || 0,
               local: parseFloat(String(row.dubaiAed)) || 0,
               aed: parseFloat(String(row.dubaiAed)) || 0,
-              paymentTerm: hasPermission('paymentTerm') ? (cleanString(row.paymentTerm) || null) : null,
+              paymentTerm: hasPermission('paymentTerm') ? normalizePaymentTerm(row.paymentTerm) : null,
               paymentMethod: hasPermission('paymentMethod') ? (cleanString(row.paymentMethod) || null) : null,
             });
           }
@@ -1994,8 +2206,8 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
 
       case 'paymentTerm':
         // Convert comma-separated string to array for react-select
-        const selectedTerms = (groupDisplayValue as string) 
-          ? (groupDisplayValue as string).split(',').map(t => t.trim()).filter(t => t)
+        const selectedTerms = (typeof groupDisplayValue === 'string' && groupDisplayValue) 
+          ? groupDisplayValue.split(',').map(t => t.trim()).filter(t => t)
           : [];
         const selectedTermOptions = paymentTermOptions
           .filter(opt => selectedTerms.includes(opt.code))
@@ -2061,8 +2273,8 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
 
       case 'paymentMethod':
         // Convert comma-separated string to array for react-select
-        const selectedMethods = (groupDisplayValue as string) 
-          ? (groupDisplayValue as string).split(',').map(m => m.trim()).filter(m => m)
+        const selectedMethods = (typeof groupDisplayValue === 'string' && groupDisplayValue) 
+          ? groupDisplayValue.split(',').map(m => m.trim()).filter(m => m)
           : [];
         const selectedOptions = paymentMethodOptions
           .filter(opt => selectedMethods.includes(opt.code))
