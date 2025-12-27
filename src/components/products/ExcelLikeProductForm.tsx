@@ -607,10 +607,8 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         
         // Fetch next customer listing number WITH multi-variant support
         try {
-          const customerListingData = await ProductService.getNextCustomerListingNumber(
-            variantType === 'multi'  // Send true for multi-variant
-          );
-          setCurrentCustomerListingNumber(customerListingData.data?.listingNumber || customerListingData.listingNumber || 1);
+          const customerListingData = await ProductService.getNextCustomerListingNumber(variantType === 'multi');
+          setCurrentCustomerListingNumber(customerListingData.data?.listingNumber || 1);
         } catch (error) {
           console.error('Error fetching customer listing number:', error);
           // Default to 1 if fetch fails
@@ -831,15 +829,13 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
       setRows(prevRows => prevRows.map((row, index) => {
         const updatedRow = { ...row };
         let prefix = `L${currentCustomerListingNumber}`;
-        
         // For multi-variant: L{N}M{N} (e.g., L1M1, L2M2) - M number matches L number
         if (variantType === 'multi') {
           prefix = `L${currentCustomerListingNumber}M${currentCustomerListingNumber}`;
         }
-        
-        // Customer listing number: NO supplier code, overall counting
+
         const customerListingNo = `${prefix}-${index + 1}`;
-        
+
         if (!updatedRow.customerListingNumber || updatedRow.customerListingNumber !== customerListingNo) {
           updatedRow.customerListingNumber = customerListingNo;
         }
