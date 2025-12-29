@@ -314,17 +314,12 @@ const ProductVariantForm: React.FC = () => {
           return colorMap[colorUpper] || color;
         };
 
-        // Helper to normalize country to match enum values
+        // Helper to normalize country - same as admin panel: store code directly (HK or USA)
+        // Admin panel stores row.country directly without normalization
         const normalizeCountry = (country: string | null | undefined): string | null => {
           if (!country) return null;
-          const countryUpper = country.toUpperCase().trim();
-          if (countryUpper === 'HK' || countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG') {
-            return 'Hongkong';
-          }
-          if (countryUpper === 'D' || countryUpper === 'DUBAI' || countryUpper === 'USA') {
-            return 'Dubai';
-          }
-          return country;
+          // Return as is - admin panel stores codes directly (HK for Hongkong, USA for Dubai)
+          return country.trim() || null;
         };
         
         // Build countryDeliverables - only if seller has permission for price fields
@@ -736,6 +731,21 @@ const ProductVariantForm: React.FC = () => {
           product.lockUnlock = row.lockUnlock === '1';
         }
         
+        // Map status field to isStatus (active/nonactive)
+        if (hasPermission('status')) {
+          const statusValue = row.status ? String(row.status).trim().toLowerCase() : 'active';
+          // Map status to isStatus field
+          if (statusValue === 'active' || statusValue === 'nonactive' || statusValue === 'non active') {
+            product.isStatus = statusValue === 'non active' ? 'nonactive' : statusValue;
+          } else {
+            // Default to active if invalid value
+            product.isStatus = 'active';
+          }
+        } else {
+          // Default to active if no permission
+          product.isStatus = 'active';
+        }
+        
         // Calculate price from countryDeliverables for legacy support
         if (countryDeliverables.length > 0) {
           const firstDeliverable = countryDeliverables[0];
@@ -847,6 +857,24 @@ const ProductVariantForm: React.FC = () => {
           addFieldIfPermitted('batteryHealth', productData.batteryHealth);
           if (hasPermission('lockUnlock')) {
             updatePayload.lockUnlock = productData.lockUnlock !== undefined ? productData.lockUnlock : false;
+          }
+          
+          // Map status field to isStatus (active/nonactive)
+          if (hasPermission('status')) {
+            if (productData.isStatus !== undefined) {
+              const statusValue = String(productData.isStatus).trim().toLowerCase();
+              if (statusValue === 'active' || statusValue === 'nonactive' || statusValue === 'non active') {
+                updatePayload.isStatus = statusValue === 'non active' ? 'nonactive' : statusValue;
+              } else {
+                updatePayload.isStatus = 'active';
+              }
+            } else if (editProduct && (editProduct as any).isStatus) {
+              // Preserve existing isStatus if not provided
+              updatePayload.isStatus = (editProduct as any).isStatus;
+            } else {
+              // Default to active
+              updatePayload.isStatus = 'active';
+            }
           }
           
           // Include countryDeliverables if seller has permission for price fields
@@ -966,6 +994,24 @@ const ProductVariantForm: React.FC = () => {
               addFieldIfPermitted('batteryHealth', productData.batteryHealth);
               if (hasPermission('lockUnlock')) {
                 updatePayload.lockUnlock = productData.lockUnlock !== undefined ? productData.lockUnlock : false;
+              }
+              
+              // Map status field to isStatus (active/nonactive)
+              if (hasPermission('status')) {
+                if (productData.isStatus !== undefined) {
+                  const statusValue = String(productData.isStatus).trim().toLowerCase();
+                  if (statusValue === 'active' || statusValue === 'nonactive' || statusValue === 'non active') {
+                    updatePayload.isStatus = statusValue === 'non active' ? 'nonactive' : statusValue;
+                  } else {
+                    updatePayload.isStatus = 'active';
+                  }
+                } else if (editProd && (editProd as any).isStatus) {
+                  // Preserve existing isStatus if not provided
+                  updatePayload.isStatus = (editProd as any).isStatus;
+                } else {
+                  // Default to active
+                  updatePayload.isStatus = 'active';
+                }
               }
               
               // Include countryDeliverables if seller has permission for price fields

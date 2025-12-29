@@ -65,6 +65,7 @@ export interface UpdateProductRequest {
   batteryHealth?: string;
   lockUnlock?: boolean;
   startTime?: string;
+  isStatus?: string;
 }
 
 export interface ListProductsRequest {
@@ -281,6 +282,9 @@ export class ProductService {
       }
       if (payload.startTime !== undefined) {
         processedPayload.startTime = payload.startTime;
+      }
+      if (payload.isStatus !== undefined) {
+        processedPayload.isStatus = payload.isStatus;
       }
       
       // Include countryDeliverables if provided (for price updates)

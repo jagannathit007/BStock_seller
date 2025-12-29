@@ -210,96 +210,100 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           subModelName = product.specification;
         }
         
-        // Map country from full name to code (for dropdown)
+        // Map country from database to dropdown code
+        // Database stores full names (Hongkong, Dubai) but dropdown uses codes (HK, USA)
+        // Convert full names to codes for dropdown selection
         let countryCode = '';
         if (product.country) {
-          const countryUpper = product.country.toUpperCase().trim();
-          // Try to find matching country code from constants first
-          if (constants?.spec?.COUNTRY && Array.isArray(constants.spec.COUNTRY)) {
-            const matchingCountry = constants.spec.COUNTRY.find((c: any) => 
-              c.name?.toUpperCase() === countryUpper || 
-              c.code?.toUpperCase() === countryUpper ||
-              countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG' || countryUpper === 'HK'
-            );
-            if (matchingCountry) {
-              countryCode = matchingCountry.code;
-            } else {
-              // Fallback to common mappings
-              if (countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG' || countryUpper === 'HK') {
-                countryCode = 'HK';
-              } else if (countryUpper === 'DUBAI' || countryUpper === 'D' || countryUpper === 'UAE') {
-                countryCode = 'D';
+          const countryValue = String(product.country).trim();
+          const countryUpper = countryValue.toUpperCase();
+          
+          // Convert full names to codes for dropdown
+          if (countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG') {
+            countryCode = 'HK';
+          } else if (countryUpper === 'DUBAI' || countryUpper === 'D' || countryUpper === 'UAE') {
+            countryCode = 'USA';
+          } else if (countryUpper === 'HK' || countryUpper === 'USA') {
+            // Already a code, use as-is
+            countryCode = countryValue;
+          } else {
+            // Try to find matching code from constants
+            if (constants?.spec?.COUNTRY && Array.isArray(constants.spec.COUNTRY)) {
+              const matchingCountry = constants.spec.COUNTRY.find((c: any) => 
+                c.name?.toUpperCase() === countryUpper ||
+                c.code?.toUpperCase() === countryUpper
+              );
+              if (matchingCountry) {
+                countryCode = matchingCountry.code;
               } else {
-                // If it's already a code, use it as is
-                countryCode = product.country;
+                countryCode = countryValue; // Use as-is if no match
               }
-            }
-          } else {
-            // Fallback if constants not loaded yet
-            if (countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG' || countryUpper === 'HK') {
-              countryCode = 'HK';
-            } else if (countryUpper === 'DUBAI' || countryUpper === 'D' || countryUpper === 'UAE') {
-              countryCode = 'D';
             } else {
-              countryCode = product.country;
+              countryCode = countryValue; // Use as-is if constants not loaded
             }
           }
         }
         
-        // Map status from name to code (for dropdown)
+        // Map isStatus from backend to status field (active/nonactive)
         let statusCode = '';
-        if ((product as any).status) {
-          const statusValue = String((product as any).status).trim();
-          // Try to find matching status code from constants
-          if (constants?.status && Array.isArray(constants.status)) {
-            const matchingStatus = constants.status.find((s: any) => 
-              s.name === statusValue || s.code === statusValue
-            );
-            if (matchingStatus) {
-              statusCode = matchingStatus.code;
-            } else {
-              // If no match, use the value as is (might already be a code)
-              statusCode = statusValue;
-            }
+        if ((product as any).isStatus) {
+          const isStatusValue = String((product as any).isStatus).trim().toLowerCase();
+          // Map isStatus to status field (active/nonactive)
+          if (isStatusValue === 'active' || isStatusValue === 'nonactive' || isStatusValue === 'non active') {
+            statusCode = isStatusValue === 'non active' ? 'nonactive' : isStatusValue;
           } else {
-            statusCode = statusValue;
+            // Fallback to 'active' if invalid value
+            statusCode = 'active';
           }
+        } else if ((product as any).status) {
+          // Fallback to old status field if isStatus not available
+          const statusValue = String((product as any).status).trim().toLowerCase();
+          if (statusValue === 'active' || statusValue === 'nonactive' || statusValue === 'non active') {
+            statusCode = statusValue === 'non active' ? 'nonactive' : statusValue;
+          } else {
+            statusCode = 'active'; // Default to active
+          }
+        } else {
+          statusCode = 'active'; // Default to active
         }
         
-        // Normalize SIM type to match dropdown values
+        // Normalize SIM type to match dropdown values - same logic as admin panel
+        // Admin panel uses product.simType directly, but we need to ensure it matches available options
         let simValue = '';
         if (product.simType) {
+          const simTypeValue = String(product.simType).trim();
+          
           // Get available SIM options for the selected country
           const availableSimOptions = countryCode && constants?.spec?.COUNTRY
             ? (constants.spec.COUNTRY.find((c: any) => c.code === countryCode)?.SIM || [])
             : [];
           
-          // Try to find exact match first
-          const exactMatch = availableSimOptions.find((opt: string) => 
-            opt.toUpperCase() === product.simType.toUpperCase()
-          );
-          
-          if (exactMatch) {
-            simValue = exactMatch;
-          } else {
-            // Try common mappings
-            const simUpper = product.simType.toUpperCase().trim();
-            if (simUpper.includes('DUAL') || simUpper === 'DUAL SIM') {
-              // Find DUAL SIM option
-              const dualMatch = availableSimOptions.find((opt: string) => 
-                opt.toUpperCase().includes('DUAL')
-              );
-              simValue = dualMatch || 'DUAL SIM';
-            } else if (simUpper.includes('SINGLE') || simUpper === 'SINGLE SIM') {
-              // Find SINGLE SIM option
-              const singleMatch = availableSimOptions.find((opt: string) => 
-                opt.toUpperCase().includes('SINGLE')
-              );
-              simValue = singleMatch || 'SINGLE SIM';
+          if (availableSimOptions.length > 0) {
+            // Try to find exact match first (case-insensitive)
+            const exactMatch = availableSimOptions.find((opt: string) => 
+              String(opt).toUpperCase().trim() === simTypeValue.toUpperCase()
+            );
+            
+            if (exactMatch) {
+              simValue = exactMatch;
             } else {
-              // Use as is if it matches a known format
-              simValue = product.simType;
+              // Try partial/fuzzy matching for common variations
+              const simUpper = simTypeValue.toUpperCase();
+              const partialMatch = availableSimOptions.find((opt: string) => {
+                const optUpper = String(opt).toUpperCase();
+                return optUpper.includes(simUpper) || simUpper.includes(optUpper);
+              });
+              
+              if (partialMatch) {
+                simValue = partialMatch;
+              } else {
+                // If no match found, use the original value (might be a valid option not in constants)
+                simValue = simTypeValue;
+              }
             }
+          } else {
+            // If no SIM options available for country, use the original value
+            simValue = simTypeValue;
           }
         }
         
@@ -692,7 +696,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     sim: '',
     version: '',
     grade: '',
-    status: '', // Will be set from constants
+    status: 'active', // Default to active for isStatus field
     condition: '',
     lockUnlock: '',
     warranty: '',
@@ -1339,18 +1343,12 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           return colorMap[colorUpper] || color; // Return mapped value or original if not in map
         };
 
-        // Helper to normalize country to match enum values
+        // Helper to normalize country - same as admin panel: store code directly (HK or USA)
+        // Admin panel stores row.country directly without normalization
         const normalizeCountry = (country: string | null | undefined): string | null => {
           if (!country) return null;
-          const countryUpper = country.toUpperCase().trim();
-          // Map common country codes/values to enum values
-          if (countryUpper === 'HK' || countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG') {
-            return 'Hongkong';
-          }
-          if (countryUpper === 'D' || countryUpper === 'DUBAI' || countryUpper === 'UAE') {
-            return 'Dubai';
-          }
-          return country; // Return original if already correct format
+          // Return as is - admin panel stores codes directly (HK for Hongkong, USA for Dubai)
+          return country.trim() || null;
         };
         
         const countryDeliverables: any[] = [];
@@ -1695,6 +1693,21 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           product.lockUnlock = row.lockUnlock === '1';
         }
         
+        // Map status field to isStatus (active/nonactive)
+        if (hasPermission('status')) {
+          const statusValue = row.status ? String(row.status).trim().toLowerCase() : 'active';
+          // Map status to isStatus field
+          if (statusValue === 'active' || statusValue === 'nonactive' || statusValue === 'non active') {
+            product.isStatus = statusValue === 'non active' ? 'nonactive' : statusValue;
+          } else {
+            // Default to active if invalid value
+            product.isStatus = 'active';
+          }
+        } else {
+          // Default to active if no permission
+          product.isStatus = 'active';
+        }
+        
         return product;
       });
 
@@ -1786,7 +1799,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     { key: 'weight', label: 'WEIGHT', width: 100, group: 'Pricing/Delivery', permissionField: 'weight' },
     { key: 'purchaseType', label: 'PURCHASE TYPE*', width: 130, group: 'Pricing/Delivery', permissionField: 'purchaseType' },
     ...(variantType === 'multi' ? [{ key: 'totalMoq', label: 'MOQ PER CART*', width: 150, group: 'Pricing/Delivery', permissionField: 'totalMoq' }] : []),
-    ...customColumns, // Add dynamic custom columns
     { key: 'paymentTerm', label: 'PAYMENT TERM*', width: 200, group: 'Payment', permissionField: 'paymentTerm' },
     { key: 'paymentMethod', label: 'PAYMENT METHOD*', width: 200, group: 'Payment', permissionField: 'paymentMethod' },
     { key: 'negotiableFixed', label: 'NEGOTIABLE/FIXED', width: 150, group: 'Other Info', permissionField: 'negotiableFixed' },
@@ -1802,27 +1814,21 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     { key: 'startTime', label: 'START TIME', width: 150, group: 'Other Info', permissionField: 'startTime' },
     { key: 'endTime', label: 'END TIME *', width: 150, group: 'Other Info', permissionField: 'endTime' },
     { key: 'remark', label: 'REMARK', width: 150, group: 'Other Info', permissionField: 'remark' },
+    ...customColumns, // Add dynamic custom columns at the end
   ];
 
   // Filter columns based on permissions - strict mode: only show fields with permission
   const columns = allColumns.filter((col): col is ColumnDefinition => {
     // Always show custom fields (no permission check needed)
-    // Custom columns don't have group/permissionField, so check if it's in customColumns array
-    if (!('group' in col) && !('permissionField' in col)) {
+    // Custom columns don't have permissionField, so check if it's in customColumns array
+    if (!('permissionField' in col)) {
       return true; // This is a custom column, always show
     }
     
-    if ('group' in col && col.group === 'Custom Fields') {
-      return true;
-    }
-    
-    // For all fields, check permission
-    // Type guard: check if col has permissionField property and it's a string
-    if ('permissionField' in col) {
-      const permissionFieldValue = (col as Extract<ColumnDefinition, { permissionField: string }>).permissionField;
-      if (permissionFieldValue) {
-        return hasPermission(permissionFieldValue);
-      }
+    // For all fields with permissionField, check permission
+    const permissionFieldValue = (col as Extract<ColumnDefinition, { permissionField: string }>).permissionField;
+    if (permissionFieldValue) {
+      return hasPermission(permissionFieldValue);
     }
     
     // If no permissionField defined, don't show (strict mode)
@@ -1842,8 +1848,11 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     return country?.SIM || [];
   };
   
-  // Get status options from constants (show name, store code)
-  const statusOptions = constants?.status || [];
+  // Status options for isStatus field (active/nonactive)
+  const statusOptions = [
+    { code: 'active', name: 'Active' },
+    { code: 'nonactive', name: 'Non Active' }
+  ];
   
   const conditionOptions = ['AAA', 'A+', 'Mixed'];
   
@@ -2093,9 +2102,12 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         );
 
       case 'status':
+        // Handle both 'active'/'nonactive' and legacy values
+        const statusValue = value as string;
+        const normalizedStatusValue = statusValue === 'non active' ? 'nonactive' : (statusValue || 'active');
         return (
           <select
-            value={value as string}
+            value={normalizedStatusValue}
             onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
             className="w-full px-2 py-1.5 text-xs border-0 bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 cursor-pointer appearance-none"
             required
