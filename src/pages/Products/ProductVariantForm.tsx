@@ -232,7 +232,7 @@ const ProductVariantForm: React.FC = () => {
     return /^[0-9a-fA-F]{24}$/.test(id);
   };
 
-  const handleFormSave = async (rows: ProductRowData[], totalMoq?: number | string) => {
+  const handleFormSave = async (rows: ProductRowData[], totalMoq?: number | string, customColumns?: Array<{ key: string; label: string; width: number }>) => {
     try {
       setLoading(true);
       
@@ -293,6 +293,27 @@ const ProductVariantForm: React.FC = () => {
         return matched || null;
       };
       
+      // Helper to normalize country - convert full names to codes (HK or USA)
+      // Map Hongkong -> HK, Dubai -> USA
+      const normalizeCountry = (country: string | null | undefined): string | null => {
+        if (!country) return null;
+        const countryTrimmed = country.trim();
+        const countryUpper = countryTrimmed.toUpperCase();
+        
+        // Map full names to codes
+        if (countryUpper === 'HONGKONG' || countryUpper === 'HONG KONG') {
+          return 'HK';
+        } else if (countryUpper === 'DUBAI' || countryUpper === 'UAE') {
+          return 'USA';
+        } else if (countryUpper === 'HK' || countryUpper === 'USA') {
+          // Already a code, use as-is
+          return countryTrimmed;
+        } else {
+          // Unknown value, return as-is (backend will validate)
+          return countryTrimmed;
+        }
+      };
+      
       const productsToCreate = rows.map((row, rowIndex) => {
         // Helper to convert empty strings to null
         const cleanString = (val: string | null | undefined): string | null => {
@@ -312,14 +333,6 @@ const ProductVariantForm: React.FC = () => {
             'MIXED': 'Mixed',
           };
           return colorMap[colorUpper] || color;
-        };
-
-        // Helper to normalize country - same as admin panel: store code directly (HK or USA)
-        // Admin panel stores row.country directly without normalization
-        const normalizeCountry = (country: string | null | undefined): string | null => {
-          if (!country) return null;
-          // Return as is - admin panel stores codes directly (HK for Hongkong, USA for Dubai)
-          return country.trim() || null;
         };
         
         // Build countryDeliverables - only if seller has permission for price fields
@@ -618,11 +631,17 @@ const ProductVariantForm: React.FC = () => {
         }
         
         // Only include customMessage if permission exists
+        // Always include it (even if empty) to allow clearing the field
         if (hasPermission('customMessage')) {
           const customMsg = cleanString(row.customMessage);
-          if (customMsg) {
-            product.customMessage = customMsg;
-          }
+          product.customMessage = customMsg || null; // Send null if empty to clear
+        }
+        
+        // Only include adminCustomMessage if permission exists
+        // Always include it (even if empty) to allow clearing the field
+        if (hasPermission('adminCustomMessage')) {
+          const adminCustomMsg = cleanString(row.adminCustomMessage);
+          product.adminCustomMessage = adminCustomMsg || null; // Send null if empty to clear
         }
         
         // Only include totalMoq if permission exists
@@ -655,9 +674,19 @@ const ProductVariantForm: React.FC = () => {
         }
         
         // Only include vendor if permission exists
-        if (hasPermission('vendor')) {
-          const vendorValue = cleanString(row.vendor);
-          if (vendorValue) {
+        // Map vendor code to enum value: backend expects 'att' or 'tmobile'
+        if (hasPermission('vendor') && row.vendor) {
+          const vendorValue = String(row.vendor).trim();
+          // Map code to enum value - backend enum: ['att', 'tmobile']
+          // Map numeric codes: '1' -> 'att', '2' -> 'tmobile'
+          if (vendorValue === '1') {
+            product.vendor = 'att';
+          } else if (vendorValue === '2') {
+            product.vendor = 'tmobile';
+          } else if (vendorValue.toLowerCase() === 'att' || vendorValue.toLowerCase() === 'tmobile') {
+            product.vendor = vendorValue.toLowerCase();
+          } else {
+            // Fallback: try to use as-is (backend will validate)
             product.vendor = vendorValue;
           }
         }
@@ -671,9 +700,19 @@ const ProductVariantForm: React.FC = () => {
         }
         
         // Only include carrier if permission exists
-        if (hasPermission('carrier')) {
-          const carrierValue = cleanString(row.carrier);
-          if (carrierValue) {
+        // Map carrier code to enum value: backend expects 'tmob' or 'mixed'
+        if (hasPermission('carrier') && row.carrier) {
+          const carrierValue = String(row.carrier).trim();
+          // Map code to enum value - backend enum: ['tmob', 'mixed']
+          // Map numeric codes: '1' -> 'tmob', '2' -> 'mixed'
+          if (carrierValue === '1') {
+            product.carrier = 'tmob';
+          } else if (carrierValue === '2') {
+            product.carrier = 'mixed';
+          } else if (carrierValue.toLowerCase() === 'tmob' || carrierValue.toLowerCase() === 'mixed') {
+            product.carrier = carrierValue.toLowerCase();
+          } else {
+            // Fallback: try to use as-is (backend will validate)
             product.carrier = carrierValue;
           }
         }
@@ -703,11 +742,10 @@ const ProductVariantForm: React.FC = () => {
         }
         
         // Only include remark if permission exists
+        // Always include it (even if empty) to allow clearing the field
         if (hasPermission('remark')) {
           const remarkValue = cleanString(row.remark);
-          if (remarkValue) {
-            product.remark = remarkValue;
-          }
+          product.remark = remarkValue || null; // Send null if empty to clear
         }
         
         // Only include warranty if permission exists
@@ -746,6 +784,33 @@ const ProductVariantForm: React.FC = () => {
           product.isStatus = 'active';
         }
         
+        // Collect custom fields and send to backend
+        // Extract custom field keys from row that start with 'custom_'
+        const customFieldsMap: Record<string, string> = {};
+        const customColsMetadata: Array<{ key: string; label: string; width: number }> = [];
+        Object.keys(row).forEach(key => {
+          if (key.startsWith('custom_')) {
+            const value = row[key as keyof ProductRowData];
+            // Remove custom_ prefix when sending to backend
+            const backendKey = key.replace(/^custom_/, '');
+            // Include value even if empty (backend can handle empty strings)
+            const fieldValue = (value && typeof value === 'string') ? value.trim() : '';
+            customFieldsMap[backendKey] = fieldValue;
+            // Store column metadata
+            customColsMetadata.push({
+              key: backendKey,
+              label: backendKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+              width: 150
+            });
+          }
+        });
+        // Always include customFields in payload if any custom columns exist (even if empty values)
+        if (Object.keys(customFieldsMap).length > 0) {
+          product.customFields = customFieldsMap;
+          // Store custom column definitions (metadata) in payload for backend storage
+          product.customColumns = customColsMetadata;
+        }
+        
         // Calculate price from countryDeliverables for legacy support
         if (countryDeliverables.length > 0) {
           const firstDeliverable = countryDeliverables[0];
@@ -774,10 +839,18 @@ const ProductVariantForm: React.FC = () => {
               if (value !== undefined) {
                 if (allowNull) {
                   // Allow null/empty to clear the field
-                  updatePayload[fieldName] = value === '' ? null : value;
-                } else if (value !== null && (allowZero || value !== '')) {
+                  // Convert empty string to null, preserve null, preserve other values
+                  updatePayload[fieldName] = (value === '' || value === null) ? null : value;
+                } else if (value !== null && value !== '' && (allowZero || value !== 0)) {
+                  // Only send non-empty, non-null values (unless allowZero is true for numeric 0)
                   updatePayload[fieldName] = value;
+                } else if (value === '' || value === null) {
+                  // For text fields without allowNull, explicitly send empty string or null to clear the field
+                  updatePayload[fieldName] = value === '' ? '' : null;
                 }
+              } else if (allowNull) {
+                // If value is undefined but allowNull is true, send null to clear the field
+                updatePayload[fieldName] = null;
               }
             }
           };
@@ -792,19 +865,21 @@ const ProductVariantForm: React.FC = () => {
           if (hasPermission('grade')) {
             updatePayload.gradeId = productData.gradeId !== undefined ? (productData.gradeId || null) : undefined;
           }
-          addFieldIfPermitted('specification', productData.specification);
+          addFieldIfPermitted('specification', productData.specification, true);
           // simType can be null/empty to clear
           if (hasPermission('sim')) {
             updatePayload.simType = productData.simType !== undefined ? (productData.simType || null) : undefined;
           }
-          addFieldIfPermitted('color', productData.color);
-          addFieldIfPermitted('ram', productData.ram);
-          addFieldIfPermitted('storage', productData.storage);
+          addFieldIfPermitted('color', productData.color, true);
+          addFieldIfPermitted('ram', productData.ram, true);
+          addFieldIfPermitted('storage', productData.storage, true);
           addFieldIfPermitted('weight', productData.weight);
           addFieldIfPermitted('condition', productData.condition);
-          // country can be null to clear
+          // country can be null to clear - normalize to HK or USA
           if (hasPermission('country')) {
-            updatePayload.country = productData.country !== undefined ? (productData.country || null) : undefined;
+            if (productData.country !== undefined) {
+              updatePayload.country = normalizeCountry(productData.country);
+            }
           }
           // stock is required by backend - always include it
           if (hasPermission('totalQty')) {
@@ -835,26 +910,33 @@ const ProductVariantForm: React.FC = () => {
               }
             }
           }
-          addFieldIfPermitted('startTime', productData.startTime);
-          addFieldIfPermitted('expiryTime', productData.expiryTime);
-          addFieldIfPermitted('supplierListingNumber', productData.supplierListingNumber);
-          addFieldIfPermitted('customerListingNumber', productData.customerListingNumber);
-          addFieldIfPermitted('packing', productData.packing);
-          addFieldIfPermitted('currentLocation', productData.currentLocation);
+          addFieldIfPermitted('startTime', productData.startTime, true);
+          addFieldIfPermitted('expiryTime', productData.expiryTime, true);
+          addFieldIfPermitted('supplierListingNumber', productData.supplierListingNumber, true);
+          addFieldIfPermitted('customerListingNumber', productData.customerListingNumber, true);
+          addFieldIfPermitted('packing', productData.packing, true);
+          addFieldIfPermitted('currentLocation', productData.currentLocation, true);
           addFieldIfPermitted('deliveryLocation', productData.deliveryLocation);
-          addFieldIfPermitted('customMessage', productData.customMessage);
-          addFieldIfPermitted('paymentTerm', productData.paymentTerm);
-          addFieldIfPermitted('paymentMethod', productData.paymentMethod);
-          addFieldIfPermitted('shippingTime', productData.shippingTime);
-          addFieldIfPermitted('vendor', productData.vendor);
-          addFieldIfPermitted('vendorListingNo', productData.vendorListingNo);
-          addFieldIfPermitted('carrier', productData.carrier);
-          addFieldIfPermitted('carrierListingNo', productData.carrierListingNo);
-          addFieldIfPermitted('uniqueListingNo', productData.uniqueListingNo);
-          addFieldIfPermitted('tags', productData.tags);
-          addFieldIfPermitted('remark', productData.remark);
-          addFieldIfPermitted('warranty', productData.warranty);
-          addFieldIfPermitted('batteryHealth', productData.batteryHealth);
+          addFieldIfPermitted('customMessage', productData.customMessage, true);
+          addFieldIfPermitted('paymentTerm', productData.paymentTerm, true);
+          addFieldIfPermitted('paymentMethod', productData.paymentMethod, true);
+          addFieldIfPermitted('shippingTime', productData.shippingTime, true);
+          addFieldIfPermitted('vendor', productData.vendor, true);
+          addFieldIfPermitted('vendorListingNo', productData.vendorListingNo, true);
+          addFieldIfPermitted('carrier', productData.carrier, true);
+          addFieldIfPermitted('carrierListingNo', productData.carrierListingNo, true);
+          addFieldIfPermitted('uniqueListingNo', productData.uniqueListingNo, true);
+          addFieldIfPermitted('tags', productData.tags, true);
+          addFieldIfPermitted('remark', productData.remark, true);
+          addFieldIfPermitted('warranty', productData.warranty, true);
+          addFieldIfPermitted('batteryHealth', productData.batteryHealth, true);
+          
+          // Handle adminCustomMessage field (if permission exists)
+          if (hasPermission('adminCustomMessage')) {
+            if (productData.adminCustomMessage !== undefined) {
+              updatePayload.adminCustomMessage = productData.adminCustomMessage === '' ? null : productData.adminCustomMessage;
+            }
+          }
           if (hasPermission('lockUnlock')) {
             updatePayload.lockUnlock = productData.lockUnlock !== undefined ? productData.lockUnlock : false;
           }
@@ -875,6 +957,43 @@ const ProductVariantForm: React.FC = () => {
               // Default to active
               updatePayload.isStatus = 'active';
             }
+          }
+          
+          // Collect custom fields and send to backend
+          // Always extract custom fields based on current customColumns state (from ExcelLikeProductForm)
+          // This ensures deleted custom fields are not included and empty values are sent
+          const customFieldsMap: Record<string, string> = {};
+          const customColsMetadata: Array<{ key: string; label: string; width: number }> = [];
+          const row = rows[0]; // Single variant - use first row
+          
+          // Use customColumns passed from ExcelLikeProductForm to know which fields to include
+          if (customColumns && customColumns.length > 0) {
+            customColumns.forEach(customCol => {
+              const value = row[customCol.key as keyof ProductRowData];
+              // Remove custom_ prefix when sending to backend
+              const backendKey = customCol.key.startsWith('custom_') 
+                ? customCol.key.replace(/^custom_/, '') 
+                : customCol.key;
+              // Include value even if empty (backend can handle empty strings)
+              const fieldValue = (value && typeof value === 'string') ? value.trim() : '';
+              customFieldsMap[backendKey] = fieldValue;
+              // Store column metadata
+              customColsMetadata.push({
+                key: backendKey,
+                label: customCol.label || backendKey.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()),
+                width: customCol.width || 150
+              });
+            });
+          }
+          
+          // Always include customFields in update payload based on current customColumns
+          // If no custom columns exist, send empty object to clear all custom fields
+          updatePayload.customFields = customFieldsMap;
+          if (customColsMetadata.length > 0) {
+            updatePayload.customColumns = customColsMetadata;
+          } else {
+            // If no custom columns, send empty array to clear customColumns in backend
+            updatePayload.customColumns = [];
           }
           
           // Include countryDeliverables if seller has permission for price fields
@@ -911,10 +1030,18 @@ const ProductVariantForm: React.FC = () => {
                   if (value !== undefined) {
                     if (allowNull) {
                       // Allow null/empty to clear the field
-                      updatePayload[fieldName] = value === '' ? null : value;
-                    } else if (value !== null && (allowZero || value !== '')) {
+                      // Convert empty string to null, preserve null, preserve other values
+                      updatePayload[fieldName] = (value === '' || value === null) ? null : value;
+                    } else if (value !== null && value !== '' && (allowZero || value !== 0)) {
+                      // Only send non-empty, non-null values (unless allowZero is true for numeric 0)
                       updatePayload[fieldName] = value;
+                    } else if (value === '' || value === null) {
+                      // For text fields without allowNull, explicitly send empty string or null to clear the field
+                      updatePayload[fieldName] = value === '' ? '' : null;
                     }
+                  } else if (allowNull) {
+                    // If value is undefined but allowNull is true, send null to clear the field
+                    updatePayload[fieldName] = null;
                   }
                 }
               };
@@ -929,19 +1056,21 @@ const ProductVariantForm: React.FC = () => {
               if (hasPermission('grade')) {
                 updatePayload.gradeId = productData.gradeId !== undefined ? (productData.gradeId || null) : undefined;
               }
-              addFieldIfPermitted('specification', productData.specification);
+              addFieldIfPermitted('specification', productData.specification, true);
               // simType can be null/empty to clear
               if (hasPermission('sim')) {
                 updatePayload.simType = productData.simType !== undefined ? (productData.simType || null) : undefined;
               }
-              addFieldIfPermitted('color', productData.color);
-              addFieldIfPermitted('ram', productData.ram);
-              addFieldIfPermitted('storage', productData.storage);
+              addFieldIfPermitted('color', productData.color, true);
+              addFieldIfPermitted('ram', productData.ram, true);
+              addFieldIfPermitted('storage', productData.storage, true);
               addFieldIfPermitted('weight', productData.weight);
-              addFieldIfPermitted('condition', productData.condition);
-              // country can be null to clear
+              addFieldIfPermitted('condition', productData.condition, true);
+              // country can be null to clear - normalize to HK or USA
               if (hasPermission('country')) {
-                updatePayload.country = productData.country !== undefined ? (productData.country || null) : undefined;
+                if (productData.country !== undefined) {
+                  updatePayload.country = normalizeCountry(productData.country);
+                }
               }
               // stock is required by backend - always include it
               if (hasPermission('totalQty')) {
@@ -972,26 +1101,33 @@ const ProductVariantForm: React.FC = () => {
                   }
                 }
               }
-              addFieldIfPermitted('startTime', productData.startTime);
-              addFieldIfPermitted('expiryTime', productData.expiryTime);
-              addFieldIfPermitted('supplierListingNumber', productData.supplierListingNumber);
-              addFieldIfPermitted('customerListingNumber', productData.customerListingNumber);
-              addFieldIfPermitted('packing', productData.packing);
-              addFieldIfPermitted('currentLocation', productData.currentLocation);
+              addFieldIfPermitted('startTime', productData.startTime, true);
+              addFieldIfPermitted('expiryTime', productData.expiryTime, true);
+              addFieldIfPermitted('supplierListingNumber', productData.supplierListingNumber, true);
+              addFieldIfPermitted('customerListingNumber', productData.customerListingNumber, true);
+              addFieldIfPermitted('packing', productData.packing, true);
+              addFieldIfPermitted('currentLocation', productData.currentLocation, true);
               addFieldIfPermitted('deliveryLocation', productData.deliveryLocation);
-              addFieldIfPermitted('customMessage', productData.customMessage);
-              addFieldIfPermitted('paymentTerm', productData.paymentTerm);
-              addFieldIfPermitted('paymentMethod', productData.paymentMethod);
-              addFieldIfPermitted('shippingTime', productData.shippingTime);
-              addFieldIfPermitted('vendor', productData.vendor);
-              addFieldIfPermitted('vendorListingNo', productData.vendorListingNo);
-              addFieldIfPermitted('carrier', productData.carrier);
-              addFieldIfPermitted('carrierListingNo', productData.carrierListingNo);
-              addFieldIfPermitted('uniqueListingNo', productData.uniqueListingNo);
-              addFieldIfPermitted('tags', productData.tags);
-              addFieldIfPermitted('remark', productData.remark);
-              addFieldIfPermitted('warranty', productData.warranty);
-              addFieldIfPermitted('batteryHealth', productData.batteryHealth);
+              addFieldIfPermitted('customMessage', productData.customMessage, true);
+              addFieldIfPermitted('paymentTerm', productData.paymentTerm, true);
+              addFieldIfPermitted('paymentMethod', productData.paymentMethod, true);
+              addFieldIfPermitted('shippingTime', productData.shippingTime, true);
+              addFieldIfPermitted('vendor', productData.vendor, true);
+              addFieldIfPermitted('vendorListingNo', productData.vendorListingNo, true);
+              addFieldIfPermitted('carrier', productData.carrier, true);
+              addFieldIfPermitted('carrierListingNo', productData.carrierListingNo, true);
+              addFieldIfPermitted('uniqueListingNo', productData.uniqueListingNo, true);
+              addFieldIfPermitted('tags', productData.tags, true);
+              addFieldIfPermitted('remark', productData.remark, true);
+              addFieldIfPermitted('warranty', productData.warranty, true);
+              addFieldIfPermitted('batteryHealth', productData.batteryHealth, true);
+              
+              // Handle adminCustomMessage field (if permission exists)
+              if (hasPermission('adminCustomMessage')) {
+                if (productData.adminCustomMessage !== undefined) {
+                  updatePayload.adminCustomMessage = productData.adminCustomMessage === '' ? null : productData.adminCustomMessage;
+                }
+              }
               if (hasPermission('lockUnlock')) {
                 updatePayload.lockUnlock = productData.lockUnlock !== undefined ? productData.lockUnlock : false;
               }
@@ -1012,6 +1148,43 @@ const ProductVariantForm: React.FC = () => {
                   // Default to active
                   updatePayload.isStatus = 'active';
                 }
+              }
+              
+              // Collect custom fields and send to backend
+              // Always extract custom fields based on current customColumns state (from ExcelLikeProductForm)
+              // This ensures deleted custom fields are not included and empty values are sent
+              const customFieldsMap: Record<string, string> = {};
+              const customColsMetadata: Array<{ key: string; label: string; width: number }> = [];
+              const row = rows[index]; // Multi variant - use row at current index
+              
+              // Use customColumns passed from ExcelLikeProductForm to know which fields to include
+              if (customColumns && customColumns.length > 0) {
+                customColumns.forEach(customCol => {
+                  const value = row[customCol.key as keyof ProductRowData];
+                  // Remove custom_ prefix when sending to backend
+                  const backendKey = customCol.key.startsWith('custom_') 
+                    ? customCol.key.replace(/^custom_/, '') 
+                    : customCol.key;
+                  // Include value even if empty (backend can handle empty strings)
+                  const fieldValue = (value && typeof value === 'string') ? value.trim() : '';
+                  customFieldsMap[backendKey] = fieldValue;
+                  // Store column metadata
+                  customColsMetadata.push({
+                    key: backendKey,
+                    label: customCol.label || backendKey.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()),
+                    width: customCol.width || 150
+                  });
+                });
+              }
+              
+              // Always include customFields in update payload based on current customColumns
+              // If no custom columns exist, send empty object to clear all custom fields
+              updatePayload.customFields = customFieldsMap;
+              if (customColsMetadata.length > 0) {
+                updatePayload.customColumns = customColsMetadata;
+              } else {
+                // If no custom columns, send empty array to clear customColumns in backend
+                updatePayload.customColumns = [];
               }
               
               // Include countryDeliverables if seller has permission for price fields

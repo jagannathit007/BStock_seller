@@ -66,6 +66,9 @@ export interface UpdateProductRequest {
   lockUnlock?: boolean;
   startTime?: string;
   isStatus?: string;
+  customFields?: Record<string, string>;
+  customColumns?: Array<{ key: string; label: string; width: number }>;
+  adminCustomMessage?: string | null;
 }
 
 export interface ListProductsRequest {
@@ -285,6 +288,21 @@ export class ProductService {
       }
       if (payload.isStatus !== undefined) {
         processedPayload.isStatus = payload.isStatus;
+      }
+      
+      // Include customFields if provided
+      if (payload.customFields !== undefined) {
+        processedPayload.customFields = payload.customFields;
+      }
+      
+      // Include customColumns if provided
+      if (payload.customColumns !== undefined && Array.isArray(payload.customColumns)) {
+        processedPayload.customColumns = payload.customColumns;
+      }
+      
+      // Include adminCustomMessage if provided
+      if (payload.adminCustomMessage !== undefined) {
+        processedPayload.adminCustomMessage = payload.adminCustomMessage;
       }
       
       // Include countryDeliverables if provided (for price updates)

@@ -83,7 +83,7 @@ export interface ProductRowData {
 interface ExcelLikeProductFormProps {
   variantType: 'single' | 'multi';
   variants?: VariantOption[];
-  onSave: (rows: ProductRowData[], totalMoq?: number | string) => void;
+  onSave: (rows: ProductRowData[], totalMoq?: number | string, customColumns?: Array<{ key: string; label: string; width: number }>) => void;
   onCancel: () => void;
   editProducts?: any[]; // Products to edit
 }
@@ -177,15 +177,23 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         const dubaiExchangeRate = dubaiDeliverable?.exchangeRate || dubaiDeliverable?.xe || 0;
         const dubaiAedBasePrice = dubaiBasePrice && dubaiExchangeRate ? dubaiBasePrice * dubaiExchangeRate : 0;
         
-        // Get custom fields
+        // Get custom fields and normalize keys to include custom_ prefix
+        // Backend stores custom fields without custom_ prefix (e.g., "notes")
+        // Frontend expects them with custom_ prefix (e.g., "custom_notes")
         const customFields = (product as any).customFields || {};
         const customFieldsObj: Record<string, string> = {};
         if (customFields instanceof Map) {
           customFields.forEach((value, key) => {
-            customFieldsObj[key] = value;
+            // Normalize key: add custom_ prefix if not present
+            const normalizedKey = key.startsWith('custom_') ? key : `custom_${key}`;
+            customFieldsObj[normalizedKey] = String(value || '');
           });
-        } else if (typeof customFields === 'object') {
-          Object.assign(customFieldsObj, customFields);
+        } else if (typeof customFields === 'object' && customFields !== null) {
+          Object.keys(customFields).forEach(key => {
+            // Normalize key: add custom_ prefix if not present
+            const normalizedKey = key.startsWith('custom_') ? key : `custom_${key}`;
+            customFieldsObj[normalizedKey] = String(customFields[key] || '');
+          });
         }
         
         // Find matching subSkuFamily to get subModelName
@@ -516,20 +524,38 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         }
       }
       
-      // Extract custom columns from custom fields if any
-      if (transformedRows.length > 0) {
+      // Extract custom columns from backend (product.customColumns) or from custom fields
+      // Priority 1: Check if product has customColumns field from backend
+      const firstProduct = editProducts[0];
+      if (firstProduct && (firstProduct as any).customColumns && Array.isArray((firstProduct as any).customColumns)) {
+        // Load custom columns from backend (stored in database)
+        const backendCustomCols = (firstProduct as any).customColumns.map((col: any) => ({
+          key: col.key.startsWith('custom_') ? col.key : `custom_${col.key}`,
+          label: col.label || col.key.replace(/^custom_/, '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+          width: col.width || 150,
+        }));
+        setCustomColumns(backendCustomCols);
+      } else if (transformedRows.length > 0) {
+        // Priority 2: Extract custom columns from custom fields data
         const allCustomKeys = new Set<string>();
-        transformedRows.forEach(row => {
-          Object.keys(row).forEach(key => {
-            if (key.startsWith('custom_')) {
-              allCustomKeys.add(key);
-            }
-          });
+        editProducts.forEach((product) => {
+          const customFields = (product as any).customFields || {};
+          if (customFields instanceof Map) {
+            customFields.forEach((value, key) => {
+              const normalizedKey = key.startsWith('custom_') ? key : `custom_${key}`;
+              allCustomKeys.add(normalizedKey);
+            });
+          } else if (typeof customFields === 'object' && customFields !== null) {
+            Object.keys(customFields).forEach(key => {
+              const normalizedKey = key.startsWith('custom_') ? key : `custom_${key}`;
+              allCustomKeys.add(normalizedKey);
+            });
+          }
         });
         if (allCustomKeys.size > 0) {
           const customCols = Array.from(allCustomKeys).map(key => ({
             key,
-            label: key.replace('custom_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            label: key.replace(/^custom_/, '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
             width: 150,
           }));
           setCustomColumns(customCols);
@@ -1258,7 +1284,8 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     // If editing, bypass margin/cost flow and directly save
     if (editProducts && editProducts.length > 0) {
       // Direct save for edit mode - preserve existing margins and costs
-      onSave(rowsWithListingNos, variantType === 'multi' && hasPermission('totalMoq') ? totalMoq : undefined);
+      // Pass customColumns so ProductVariantForm knows which custom fields to include
+      onSave(rowsWithListingNos, variantType === 'multi' && hasPermission('totalMoq') ? totalMoq : undefined, customColumns);
       return;
     }
     
@@ -1492,16 +1519,30 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         } else {
           product.purchaseType = 'partial'; // Default value
         }
-        // Collect custom fields
-        const customFieldsMap: Record<string, string> = {};
-        customColumns.forEach(customCol => {
-          const value = row[customCol.key as keyof ProductRowData];
-          if (value && typeof value === 'string' && value.trim()) {
-            customFieldsMap[customCol.key] = value.trim();
-          }
-        });
-        if (Object.keys(customFieldsMap).length > 0) {
+        // Collect custom fields and send to backend
+        // Remove custom_ prefix when sending to backend (backend stores without prefix)
+        // Always include customFields in payload if customColumns exist
+        if (customColumns.length > 0) {
+          const customFieldsMap: Record<string, string> = {};
+          customColumns.forEach(customCol => {
+            const value = row[customCol.key as keyof ProductRowData];
+            // Remove custom_ prefix when sending to backend
+            const backendKey = customCol.key.startsWith('custom_') 
+              ? customCol.key.replace(/^custom_/, '') 
+              : customCol.key;
+            // Include value even if empty (backend can handle empty strings)
+            customFieldsMap[backendKey] = (value && typeof value === 'string') ? value.trim() : '';
+          });
+          // Always include customFields in payload
           product.customFields = customFieldsMap;
+          
+          // Store custom column definitions (metadata) in payload for backend storage
+          // Backend will store this to restore columns when editing
+          product.customColumns = customColumns.map(col => ({
+            key: col.key.startsWith('custom_') ? col.key.replace(/^custom_/, '') : col.key,
+            label: col.label,
+            width: col.width
+          }));
         }
         
         // Only include isNegotiable if permission exists
@@ -1617,9 +1658,19 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         }
         
         // Only include vendor if permission exists and value is provided
-        if (hasPermission('vendor')) {
-          const vendorValue = cleanString(row.vendor);
-          if (vendorValue) {
+        // Map vendor code to enum value: backend expects 'att' or 'tmobile'
+        if (hasPermission('vendor') && row.vendor) {
+          const vendorValue = String(row.vendor).trim();
+          // Map code to enum value - backend enum: ['att', 'tmobile']
+          // Map numeric codes: '1' -> 'att', '2' -> 'tmobile'
+          if (vendorValue === '1') {
+            product.vendor = 'att';
+          } else if (vendorValue === '2') {
+            product.vendor = 'tmobile';
+          } else if (vendorValue.toLowerCase() === 'att' || vendorValue.toLowerCase() === 'tmobile') {
+            product.vendor = vendorValue.toLowerCase();
+          } else {
+            // Fallback: try to use as-is (backend will validate)
             product.vendor = vendorValue;
           }
         }
@@ -1633,9 +1684,19 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         }
         
         // Only include carrier if permission exists and value is provided
-        if (hasPermission('carrier')) {
-          const carrierValue = cleanString(row.carrier);
-          if (carrierValue) {
+        // Map carrier code to enum value: backend expects 'tmob' or 'mixed'
+        if (hasPermission('carrier') && row.carrier) {
+          const carrierValue = String(row.carrier).trim();
+          // Map code to enum value - backend enum: ['tmob', 'mixed']
+          // Map numeric codes: '1' -> 'tmob', '2' -> 'mixed'
+          if (carrierValue === '1') {
+            product.carrier = 'tmob';
+          } else if (carrierValue === '2') {
+            product.carrier = 'mixed';
+          } else if (carrierValue.toLowerCase() === 'tmob' || carrierValue.toLowerCase() === 'mixed') {
+            product.carrier = carrierValue.toLowerCase();
+          } else {
+            // Fallback: try to use as-is (backend will validate)
             product.carrier = carrierValue;
           }
         }
@@ -2887,6 +2948,37 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     toastHelper.showTost(`Column "${newColumnName.trim()}" added successfully`, 'success');
   };
 
+  // Function to handle deleting a custom column
+  const handleDeleteCustomColumn = (columnKey: string) => {
+    // Show confirmation dialog
+    Swal.fire({
+      title: 'Delete Custom Column?',
+      text: 'Are you sure you want to delete this custom column? This will remove the column and all its data from all rows.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Yes, delete it!',
+      cancelButtonText: 'Cancel',
+    }).then((result) => {
+      if (result.isConfirmed) {
+        // Remove the column from customColumns
+        setCustomColumns(prevColumns => prevColumns.filter(col => col.key !== columnKey));
+        
+        // Remove the field from all rows
+        setRows(prevRows => 
+          prevRows.map(row => {
+            const newRow = { ...row };
+            delete newRow[columnKey as keyof ProductRowData];
+            return newRow;
+          })
+        );
+        
+        toastHelper.showTost('Custom column deleted successfully', 'success');
+      }
+    });
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center p-12 bg-white dark:bg-gray-900">
@@ -3195,33 +3287,51 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
                 <i className="fas fa-hashtag mr-1"></i>
                 #
               </div>
-              {columns.map((col) => (
-                <div
-                  key={col.key}
-                  className={`px-3 py-3 text-xs font-bold text-gray-800 dark:text-gray-200 border-r border-gray-300 dark:border-gray-600 whitespace-nowrap hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors cursor-default ${
-                    ('group' in col && col.group === 'Custom Fields')
-                      ? 'bg-yellow-50 dark:bg-yellow-900/30'
-                      : ('subgroup' in col && col.subgroup === 'HK')
-                      ? 'bg-blue-50 dark:bg-blue-900/30' 
-                      : ('subgroup' in col && col.subgroup === 'DUBAI')
-                      ? 'bg-green-50 dark:bg-green-900/30'
-                      : ('subgroup' in col && col.subgroup === 'PAYMENT_TERM')
-                      ? 'bg-purple-50 dark:bg-purple-900/30'
-                      : ('subgroup' in col && col.subgroup === 'PAYMENT_METHOD')
-                      ? 'bg-orange-50 dark:bg-orange-900/30'
-                      : 'bg-gray-200 dark:bg-gray-800'
-                  }`}
-                  style={{ width: `${col.width}px`, minWidth: `${col.width}px` }}
-                  title={col.label}
-                >
-                  <div className="flex items-center gap-1">
-                    {col.label.includes('*') && (
-                      <span className="text-red-500 text-xs">*</span>
-                    )}
-                    <span className="truncate">{col.label.replace('*', '')}</span>
+              {columns.map((col) => {
+                const isCustomColumn = customColumns.some(cc => cc.key === col.key);
+                return (
+                  <div
+                    key={col.key}
+                    className={`px-3 py-3 text-xs font-bold text-gray-800 dark:text-gray-200 border-r border-gray-300 dark:border-gray-600 whitespace-nowrap hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors cursor-default relative group ${
+                      ('group' in col && col.group === 'Custom Fields')
+                        ? 'bg-yellow-50 dark:bg-yellow-900/30'
+                        : ('subgroup' in col && col.subgroup === 'HK')
+                        ? 'bg-blue-50 dark:bg-blue-900/30' 
+                        : ('subgroup' in col && col.subgroup === 'DUBAI')
+                        ? 'bg-green-50 dark:bg-green-900/30'
+                        : ('subgroup' in col && col.subgroup === 'PAYMENT_TERM')
+                        ? 'bg-purple-50 dark:bg-purple-900/30'
+                        : ('subgroup' in col && col.subgroup === 'PAYMENT_METHOD')
+                        ? 'bg-orange-50 dark:bg-orange-900/30'
+                        : 'bg-gray-200 dark:bg-gray-800'
+                    }`}
+                    style={{ width: `${col.width}px`, minWidth: `${col.width}px` }}
+                    title={col.label}
+                  >
+                    <div className="flex items-center gap-1 justify-between">
+                      <div className="flex items-center gap-1 flex-1 min-w-0">
+                        {col.label.includes('*') && (
+                          <span className="text-red-500 text-xs">*</span>
+                        )}
+                        <span className="truncate">{col.label.replace('*', '')}</span>
+                      </div>
+                      {isCustomColumn && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteCustomColumn(col.key);
+                          }}
+                          className="ml-1 p-1 text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                          title="Delete this custom column"
+                        >
+                          <i className="fas fa-times text-xs"></i>
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {/* Add Column Button */}
               {hasPermissionedFields && (
                 <div

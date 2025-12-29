@@ -280,6 +280,19 @@ const ProductsTable: React.FC = () => {
     }
   };
 
+  // Helper function to format country code for display
+  const formatCountry = (country: string | null | undefined): string => {
+    if (!country) return "-";
+    const countryUpper = country.toUpperCase().trim();
+    if (countryUpper === 'HK') {
+      return 'Hong Kong';
+    } else if (countryUpper === 'USA') {
+      return 'Dubai';
+    }
+    // Return as-is if not HK or USA
+    return country;
+  };
+
   const isMultiVariant = (product: Product): boolean => {
     return Boolean(product.groupCode);
   };
@@ -524,7 +537,7 @@ const ProductsTable: React.FC = () => {
                         ${formatPrice(getProductPrice(item))}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                        {item.country}
+                        {formatCountry(item.country)}
                       </td>
                       <td className="px-6 py-4 text-sm text-center">
                         {getStatusBadge(item)}
@@ -816,7 +829,7 @@ const ProductsTable: React.FC = () => {
                       Country
                     </label>
                     <p className="text-sm text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800 p-3 rounded-md">
-                      {selectedProduct.country}
+                      {formatCountry(selectedProduct.country)}
                     </p>
                   </div>
 
