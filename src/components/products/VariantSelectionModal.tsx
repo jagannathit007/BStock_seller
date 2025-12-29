@@ -18,7 +18,7 @@ const VariantSelectionModal: React.FC<VariantSelectionModalProps> = ({ isOpen, o
     // Check business profile approval status before navigating
     try {
       // First check localStorage
-      const stored = StorageService.getItem(STORAGE_KEYS.USER);
+      const stored = StorageService.getItem<any>(STORAGE_KEYS.USER);
       let businessProfileStatus = stored?.businessProfile?.status;
       
       // If not in localStorage or status is not approved, fetch fresh profile

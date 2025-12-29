@@ -55,6 +55,9 @@ export interface BusinessProfile {
   address?: string | null;
   logo?: string | null;
   certificate?: string | null;
+  status?: string | null;
+  verifiedBy?: string | null;
+  approvedBy?: string | null;
 }
 
 export interface UserProfile {
