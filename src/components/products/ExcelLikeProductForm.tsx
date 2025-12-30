@@ -1258,6 +1258,33 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           errors.push(`Row ${index + 1}: PAYMENT METHOD is required`);
         }
         if (hasPermission('endTime') && !row.endTime) errors.push(`Row ${index + 1}: END TIME is required`);
+        
+        // Validate: End time must be greater than start time
+        if (hasPermission('startTime') && hasPermission('endTime') && row.startTime && row.endTime) {
+          const startTime = new Date(row.startTime);
+          const endTime = new Date(row.endTime);
+          if (endTime <= startTime) {
+            errors.push(`Row ${index + 1}: END TIME must be greater than START TIME`);
+          }
+        }
+        
+        // Validate: No past dates allowed for start time
+        if (hasPermission('startTime') && row.startTime) {
+          const startTime = new Date(row.startTime);
+          const now = new Date();
+          if (startTime < now) {
+            errors.push(`Row ${index + 1}: START TIME cannot be in the past`);
+          }
+        }
+        
+        // Validate: No past dates allowed for end time
+        if (hasPermission('endTime') && row.endTime) {
+          const endTime = new Date(row.endTime);
+          const now = new Date();
+          if (endTime < now) {
+            errors.push(`Row ${index + 1}: END TIME cannot be in the past`);
+          }
+        }
       });
 
     if (errors.length > 0) {
@@ -2534,13 +2561,59 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
       case 'startTime':
       case 'endTime':
         const dateValue = groupDisplayValue ? new Date(groupDisplayValue as string) : null;
+        const currentRow = rows[rowIndex];
+        const startTimeValue = currentRow?.startTime ? new Date(currentRow.startTime) : null;
+        const endTimeValue = currentRow?.endTime ? new Date(currentRow.endTime) : null;
+        
+        // Get minimum date (current date/time - no past dates allowed)
+        const minDate = new Date();
+        minDate.setSeconds(0, 0); // Reset seconds and milliseconds
+        
+        // For endTime, minDate should be startTime if it exists, otherwise current time
+        const minDateForEndTime = startTimeValue && startTimeValue > minDate ? startTimeValue : minDate;
+        
+        // For startTime, maxDate should be endTime if it exists (to ensure startTime < endTime)
+        const maxDateForStartTime = endTimeValue || undefined;
+        
         return (
           <DatePicker
             selected={dateValue}
-            onChange={(date) => updateRow(rowIndex, column.key as keyof ProductRowData, date ? date.toISOString() : '')}
+            onChange={(date) => {
+              if (!date) {
+                updateRow(rowIndex, column.key as keyof ProductRowData, '');
+                return;
+              }
+              
+              // Validate: no past dates allowed
+              if (date < minDate) {
+                toastHelper.showTost('Cannot select past dates. Please select a future date.', 'error');
+                return;
+              }
+              
+              const dateISO = date.toISOString();
+              
+              if (column.key === 'startTime') {
+                // If setting startTime, validate it's before endTime
+                if (endTimeValue && date >= endTimeValue) {
+                  toastHelper.showTost('Start time must be before end time.', 'error');
+                  return;
+                }
+                updateRow(rowIndex, column.key as keyof ProductRowData, dateISO);
+              } else if (column.key === 'endTime') {
+                // If setting endTime, validate it's after startTime
+                if (startTimeValue && date <= startTimeValue) {
+                  toastHelper.showTost('End time must be after start time.', 'error');
+                  return;
+                }
+                updateRow(rowIndex, column.key as keyof ProductRowData, dateISO);
+              }
+            }}
             showTimeSelect
             timeFormat="HH:mm"
+            timeIntervals={30}
             dateFormat="yyyy-MM-dd HH:mm"
+            minDate={column.key === 'startTime' ? minDate : minDateForEndTime}
+            maxDate={column.key === 'startTime' ? (maxDateForStartTime || undefined) : undefined}
             className="w-full px-2 py-1.5 text-xs border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 placeholder:text-gray-400"
             placeholderText={column.key === 'startTime' ? "Select date & time (auto: current time)" : "Select date & time *"}
             disabled={isGroupLevelField && !isMasterRow}
@@ -2550,6 +2623,9 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
               setSelectedRowIndex(rowIndex);
             }}
             wrapperClassName="w-full"
+            popperClassName="inline-datetime-picker"
+            popperModifiers={[]}
+            calendarClassName="inline-datetime-calendar"
           />
         );
 

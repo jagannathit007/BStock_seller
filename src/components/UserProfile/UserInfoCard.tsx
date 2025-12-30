@@ -224,17 +224,25 @@ export default function UserInfoCard({
   const handleSave = async () => {
     try {
       setIsSaving(true);
-      const payload = {
-        businessName: formData.businessName?.trim(),
-        country: formData.businessCountry?.trim(),
-        address: formData.businessAddress?.trim(),
+      const payload: any = {
         name: formData?.name?.trim(),
         email: formData?.email?.trim(),
         mobileNumber: formData?.phone?.trim(),
-        logo: logoFile || undefined,
-        certificate: certificateFile || undefined,
-        submitForApproval: true, // Submit business profile for admin verification and approval
-      } as any;
+        mobileCountryCode: formData?.countryCode?.trim(),
+      };
+      
+      // Include business profile fields
+      payload.businessName = formData.businessName?.trim();
+      payload.country = formData.businessCountry?.trim();
+      payload.currencyCode = formData.businessCurrency?.trim();
+      payload.address = formData.businessAddress?.trim();
+      payload.logo = logoFile || undefined;
+      payload.certificate = certificateFile || undefined;
+      
+      // Only submit for approval when saving from Business Profile tab
+      if (activeTab === 'business') {
+        payload.submitForApproval = true;
+      }
 
       await AuthService.updateProfile(payload);
 
@@ -253,6 +261,10 @@ export default function UserInfoCard({
             p?.mobileNumber ??
             payload.mobileNumber ??
             prevUser?.mobileNumber,
+          mobileCountryCode:
+            p?.mobileCountryCode ??
+            payload.mobileCountryCode ??
+            prevUser?.mobileCountryCode,
           businessProfile: {
             ...(prevUser?.businessProfile || {}),
             businessName:
@@ -263,6 +275,10 @@ export default function UserInfoCard({
               bp?.country ??
               payload.country ??
               prevUser?.businessProfile?.country,
+            currencyCode:
+              bp?.currencyCode ??
+              payload.currencyCode ??
+              prevUser?.businessProfile?.currencyCode,
             address:
               bp?.address ??
               payload.address ??

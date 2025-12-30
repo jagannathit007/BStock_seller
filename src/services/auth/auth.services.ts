@@ -39,10 +39,12 @@ export interface LoginRequest {
 export interface ProfileData {
   businessName?: string;
   country?: string;
+  currencyCode?: string;
   address?: string;
   name?: string;
   email?: string;
   mobileNumber?: string;
+  mobileCountryCode?: string;
   logo?: File | string | null;
   certificate?: File | string | null;
   profileImage?: File | string | null;
@@ -238,10 +240,12 @@ export class AuthService {
       // Always include these fields, even if empty, so backend can clear them
       form.append('businessName', payload.businessName || '');
       form.append('country', payload.country || '');
+      form.append('currencyCode', payload.currencyCode || '');
       form.append('address', payload.address || '');
       form.append('name', payload.name || '');
       form.append('email', payload.email || '');
       form.append('mobileNumber', payload.mobileNumber || '');
+      form.append('mobileCountryCode', payload.mobileCountryCode || '');
       // Include submitForApproval flag if provided
       if (payload.submitForApproval !== undefined) {
         form.append('submitForApproval', payload.submitForApproval.toString());
@@ -282,10 +286,12 @@ export class AuthService {
       const jsonPayload: any = {
         businessName: payload.businessName || '',
         country: payload.country || '',
+        currencyCode: payload.currencyCode || '',
         address: payload.address || '',
         name: payload.name || '',
         email: payload.email || '',
-        mobileNumber: payload.mobileNumber || ''
+        mobileNumber: payload.mobileNumber || '',
+        mobileCountryCode: payload.mobileCountryCode || ''
       };
       // Include submitForApproval flag if provided
       if (payload.submitForApproval !== undefined) {

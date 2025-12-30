@@ -776,3 +776,138 @@ span.flatpickr-weekday,
 .simplebar-scrollbar.simplebar-visible:before {
   @apply opacity-100;
 }
+
+/* Inline Date-Time Picker Styles - Date and Time in Single Row */
+.inline-datetime-picker {
+  z-index: 9999 !important;
+}
+
+.inline-datetime-picker .react-datepicker {
+  display: flex !important;
+  flex-direction: row !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+  border-radius: 8px !important;
+  padding: 0 !important;
+  background: white !important;
+  font-family: inherit !important;
+  width: auto !important;
+}
+
+.inline-datetime-picker .react-datepicker__month-container {
+  border-right: 1px solid #e5e7eb !important;
+  border-radius: 8px 0 0 8px !important;
+  padding: 0 !important;
+  float: none !important;
+  display: block !important;
+  flex-shrink: 0 !important;
+}
+
+.inline-datetime-picker .react-datepicker__time-container {
+  border-left: 1px solid #e5e7eb !important;
+  border-radius: 0 8px 8px 0 !important;
+  width: 130px !important;
+  float: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex-shrink: 0 !important;
+}
+
+.inline-datetime-picker .react-datepicker__time-container .react-datepicker__time {
+  background: white !important;
+  border-radius: 0 8px 8px 0 !important;
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.inline-datetime-picker .react-datepicker__time-container .react-datepicker__time .react-datepicker__time-box {
+  width: 100% !important;
+  border-radius: 0 8px 8px 0 !important;
+  margin: 0 !important;
+}
+
+.inline-datetime-picker .react-datepicker__header--time {
+  padding: 10px 12px !important;
+  background: #f9fafb !important;
+  border-bottom: 1px solid #e5e7eb !important;
+  border-radius: 0 8px 0 0 !important;
+  text-align: center !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  color: #374151 !important;
+  margin: 0 !important;
+}
+
+.inline-datetime-picker .react-datepicker__time-list {
+  height: 240px !important;
+  overflow-y: auto !important;
+  padding: 4px 0 !important;
+  margin: 0 !important;
+}
+
+.inline-datetime-picker .react-datepicker__time-list-item {
+  padding: 8px 12px !important;
+  text-align: center !important;
+  font-size: 13px !important;
+  height: auto !important;
+  line-height: 1.5 !important;
+  white-space: nowrap !important;
+}
+
+.inline-datetime-picker .react-datepicker__time-list-item:hover {
+  background: #f3f4f6 !important;
+}
+
+.inline-datetime-picker .react-datepicker__time-list-item--selected {
+  background: #3b82f6 !important;
+  color: white !important;
+  font-weight: 600 !important;
+}
+
+.inline-datetime-picker .react-datepicker__time-list-item--selected:hover {
+  background: #2563eb !important;
+}
+
+/* Override any default positioning that might stack them */
+.inline-datetime-picker .react-datepicker__month-container {
+  position: relative !important;
+}
+
+.inline-datetime-picker .react-datepicker__time-container {
+  position: relative !important;
+}
+
+/* Dark mode support */
+.dark .inline-datetime-picker .react-datepicker {
+  background: #1f2937 !important;
+  border-color: #374151 !important;
+}
+
+.dark .inline-datetime-picker .react-datepicker__month-container {
+  border-right-color: #374151 !important;
+  background: #1f2937 !important;
+}
+
+.dark .inline-datetime-picker .react-datepicker__time-container {
+  border-left-color: #374151 !important;
+  background: #1f2937 !important;
+}
+
+.dark .inline-datetime-picker .react-datepicker__time-container .react-datepicker__time {
+  background: #1f2937 !important;
+}
+
+.dark .inline-datetime-picker .react-datepicker__header--time {
+  background: #111827 !important;
+  border-bottom-color: #374151 !important;
+  color: #f3f4f6 !important;
+}
+
+.dark .inline-datetime-picker .react-datepicker__time-list-item:hover {
+  background: #374151 !important;
+}
+
+.dark .inline-datetime-picker .react-datepicker__time-list-item--selected {
+  background: #3b82f6 !important;
+}
