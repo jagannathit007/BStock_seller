@@ -27,7 +27,6 @@ export interface ProductRowData {
   version: string;
   grade: string;
   status: string;
-  condition: string;
   lockUnlock: string;
   warranty: string;
   batteryHealth: string;
@@ -447,7 +446,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           version: product.specification || '',
           grade: grade,
           status: statusCode,
-          condition: product.condition || '',
           lockUnlock: (product as any).lockUnlock ? '1' : '0',
           warranty: (product as any).warranty || '',
           batteryHealth: (product as any).batteryHealth || '',
@@ -716,7 +714,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     version: '',
     grade: '',
     status: '', // No default - user must select
-    condition: '',
     lockUnlock: '',
     warranty: '',
     batteryHealth: '',
@@ -1509,13 +1506,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           product.weight = parseFloat(String(row.weight));
         }
         
-        // Only include condition if permission exists
-        if (hasPermission('condition')) {
-          const condition = cleanString(row.condition);
-          if (condition) {
-            product.condition = condition;
-          }
-        }
         
         // Only include country if permission exists
         if (hasPermission('country')) {
@@ -1857,9 +1847,8 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     { key: 'country', label: 'COUNTRY*', width: 120, group: 'Product Detail', permissionField: 'country' },
     { key: 'sim', label: 'SIM*', width: 120, group: 'Product Detail', permissionField: 'sim' },
     { key: 'version', label: 'VERSION', width: 120, group: 'Product Detail', permissionField: 'version' },
-    { key: 'grade', label: 'GRADE*', width: 120, group: 'Product Detail', permissionField: 'grade' },
+    { key: 'grade', label: 'GRADE*', width: 140, group: 'Product Detail', permissionField: 'grade' },
     { key: 'status', label: 'STATUS*', width: 100, group: 'Product Detail', permissionField: 'status' },
-    { key: 'condition', label: 'CONDITION', width: 120, group: 'Product Detail', permissionField: 'condition' },
     { key: 'lockUnlock', label: 'LOCK/UNLOCK*', width: 120, group: 'Product Detail', permissionField: 'lockUnlock' },
     { key: 'warranty', label: 'WARRANTY', width: 120, group: 'Product Detail', permissionField: 'warranty' },
     { key: 'batteryHealth', label: 'BATTERY HEALTH', width: 130, group: 'Product Detail', permissionField: 'batteryHealth' },
@@ -1888,7 +1877,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     { key: 'carrier', label: 'CARRIER', width: 100, group: 'Other Info', permissionField: 'carrier' },
     { key: 'carrierListingNo', label: 'CARRIER LISTING NO', width: 150, group: 'Other Info', permissionField: 'carrierListingNo' },
     { key: 'uniqueListingNo', label: 'UNIQUE LISTING NO', width: 150, group: 'Other Info', permissionField: 'uniqueListingNo' },
-    { key: 'tags', label: 'TAGS', width: 150, group: 'Other Info', permissionField: 'tags' },
+    { key: 'tags', label: 'TAGS', width: 190, group: 'Other Info', permissionField: 'tags' },
     { key: 'adminCustomMessage', label: 'ADMIN CUSTOM MESSAGE', width: 180, group: 'Other Info', permissionField: 'adminCustomMessage' },
     { key: 'startTime', label: 'START TIME', width: 150, group: 'Other Info', permissionField: 'startTime' },
     { key: 'endTime', label: 'END TIME *', width: 150, group: 'Other Info', permissionField: 'endTime' },
@@ -1932,8 +1921,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     { code: 'active', name: 'Active' },
     { code: 'nonactive', name: 'Non Active' }
   ];
-  
-  const conditionOptions = ['AAA', 'A+', 'Mixed'];
   
   // Get lockStatus options from constants (show name, store code)
   const lockUnlockOptions = constants?.lockStatus || [];
@@ -2201,22 +2188,6 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
                 {opt.name}
               </option>
             ))}
-          </select>
-        );
-
-      case 'condition':
-        return (
-          <select
-            value={value as string}
-            onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
-            className="w-full px-2 py-1.5 text-xs border-0 bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-150 cursor-pointer appearance-none"
-            onFocus={() => {
-              setFocusedCell({ row: rowIndex, col: column.key });
-              setSelectedRowIndex(rowIndex);
-            }}
-          >
-            <option value="" className="bg-white dark:bg-gray-800">Select Condition</option>
-            {conditionOptions.map(opt => <option key={opt} value={opt} className="bg-white dark:bg-gray-800">{opt}</option>)}
           </select>
         );
 

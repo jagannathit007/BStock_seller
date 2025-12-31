@@ -519,14 +519,6 @@ const ProductVariantForm: React.FC = () => {
           product.weight = parseFloat(String(row.weight));
         }
         
-        // Only include condition if permission exists
-        if (hasPermission('condition')) {
-          const condition = cleanString(row.condition);
-          if (condition) {
-            product.condition = condition;
-          }
-        }
-        
         // Only include country if permission exists
         // In edit mode, include even if null to allow clearing the field
         if (hasPermission('country')) {
@@ -869,7 +861,6 @@ const ProductVariantForm: React.FC = () => {
           addFieldIfPermitted('ram', productData.ram, true);
           addFieldIfPermitted('storage', productData.storage, true);
           addFieldIfPermitted('weight', productData.weight);
-          addFieldIfPermitted('condition', productData.condition);
           // country can be null to clear - normalize to HK or USA
           if (hasPermission('country')) {
             if (productData.country !== undefined) {
@@ -1060,7 +1051,6 @@ const ProductVariantForm: React.FC = () => {
               addFieldIfPermitted('ram', productData.ram, true);
               addFieldIfPermitted('storage', productData.storage, true);
               addFieldIfPermitted('weight', productData.weight);
-              addFieldIfPermitted('condition', productData.condition, true);
               // country can be null to clear - normalize to HK or USA
               if (hasPermission('country')) {
                 if (productData.country !== undefined) {
