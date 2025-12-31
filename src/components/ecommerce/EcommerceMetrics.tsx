@@ -63,7 +63,7 @@ export default function EcommerceMetrics() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
       {/* All Products Card */}
       <div 
         className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] md:p-6 cursor-pointer hover:shadow-lg transition-shadow"
@@ -156,10 +156,10 @@ export default function EcommerceMetrics() {
               </p>
             </div>
             <p className="text-3xl font-bold text-blue-600 dark:text-blue-400 mb-1">
-              {formatNumber(stats.products.underVerification)}
+              {formatNumber(stats.products.all - stats.products.active)}
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-500">
-              Being verified by admin
+              All products except active
             </p>
           </div>
           <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl">

@@ -259,20 +259,13 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           // Map isStatus to status field (active/nonactive)
           if (isStatusValue === 'active' || isStatusValue === 'nonactive' || isStatusValue === 'non active') {
             statusCode = isStatusValue === 'non active' ? 'nonactive' : isStatusValue;
-          } else {
-            // Fallback to 'active' if invalid value
-            statusCode = 'active';
           }
         } else if ((product as any).status) {
           // Fallback to old status field if isStatus not available
           const statusValue = String((product as any).status).trim().toLowerCase();
           if (statusValue === 'active' || statusValue === 'nonactive' || statusValue === 'non active') {
             statusCode = statusValue === 'non active' ? 'nonactive' : statusValue;
-          } else {
-            statusCode = 'active'; // Default to active
           }
-        } else {
-          statusCode = 'active'; // Default to active
         }
         
         // Normalize SIM type to match dropdown values - same logic as admin panel
@@ -473,10 +466,10 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
           totalQty: product.stock || 0,
           moqPerVariant: product.moq || 0,
           weight: (product as any).weight || '',
-          purchaseType: (product as any).purchaseType || 'partial',
+          purchaseType: (product as any).purchaseType || '',
           paymentTerm: paymentTermValue,
           paymentMethod: paymentMethodValue,
-          negotiableFixed: product.isNegotiable ? '1' : '0',
+          negotiableFixed: product.isNegotiable ? '1' : '',
           tags: (product as any).tags || '',
           flashDeal: (product as any).isFlashDeal === 'true' || (product as any).isFlashDeal === true ? '1' : '0',
           shippingTime: (product as any).shippingTime || '',
@@ -722,7 +715,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     sim: '',
     version: '',
     grade: '',
-    status: 'active', // Default to active for isStatus field
+    status: '', // No default - user must select
     condition: '',
     lockUnlock: '',
     warranty: '',
@@ -740,10 +733,10 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
     totalQty: '',
     moqPerVariant: '',
     weight: '',
-    purchaseType: 'partial',
+    purchaseType: '',
     paymentTerm: '',
     paymentMethod: '',
-    negotiableFixed: '0',
+    negotiableFixed: '',
     tags: '',
     flashDeal: '',
     shippingTime: '',
@@ -1542,9 +1535,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
         
         // Only include purchaseType if permission exists
         if (hasPermission('purchaseType')) {
-          product.purchaseType = (row.purchaseType === 'full' || row.purchaseType === 'partial') ? row.purchaseType : 'partial';
-        } else {
-          product.purchaseType = 'partial'; // Default value
+          product.purchaseType = (row.purchaseType === 'full' || row.purchaseType === 'partial') ? row.purchaseType : '';
         }
         // Collect custom fields and send to backend
         // Remove custom_ prefix when sending to backend (backend stores without prefix)
@@ -2192,7 +2183,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
       case 'status':
         // Handle both 'active'/'nonactive' and legacy values
         const statusValue = value as string;
-        const normalizedStatusValue = statusValue === 'non active' ? 'nonactive' : (statusValue || 'active');
+        const normalizedStatusValue = statusValue === 'non active' ? 'nonactive' : (statusValue || '');
         return (
           <select
             value={normalizedStatusValue}
@@ -2233,10 +2224,11 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
       case 'negotiableFixed': {
         const options = column.key === 'lockUnlock' ? lockUnlockOptions : negotiableFixedOptions;
         const fieldValue = column.key === 'negotiableFixed' ? groupDisplayValue : value;
+        const normalizedFieldValue = fieldValue as string || '';
         const isDisabledForGroup = column.key === 'negotiableFixed' && isGroupLevelField && !isMasterRow;
         return (
           <select
-            value={fieldValue as string}
+            value={normalizedFieldValue}
             onChange={(e) => updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value)}
             className="w-full px-2 py-1 text-xs border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-500"
             disabled={isDisabledForGroup}
@@ -2503,7 +2495,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
       case 'purchaseType':
         return (
           <select
-            value={value as string || 'partial'}
+            value={value as string || ''}
             onChange={(e) => {
               updateRow(rowIndex, column.key as keyof ProductRowData, e.target.value);
               // If changed to 'full', set MOQ to equal stock
@@ -2518,6 +2510,7 @@ const ExcelLikeProductForm: React.FC<ExcelLikeProductFormProps> = ({
               setSelectedRowIndex(rowIndex);
             }}
           >
+            <option value="">Select Purchase Type</option>
             <option value="partial">Partial</option>
             <option value="full">Full</option>
           </select>

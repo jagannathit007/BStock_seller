@@ -548,9 +548,7 @@ const ProductVariantForm: React.FC = () => {
         
         // Only include purchaseType if permission exists
         if (hasPermission('purchaseType')) {
-          product.purchaseType = (row.purchaseType === 'full' || row.purchaseType === 'partial') ? row.purchaseType : 'partial';
-        } else {
-          product.purchaseType = 'partial'; // Default
+          product.purchaseType = (row.purchaseType === 'full' || row.purchaseType === 'partial') ? row.purchaseType : '';
         }
         
         // Only include isNegotiable if permission exists
@@ -771,13 +769,10 @@ const ProductVariantForm: React.FC = () => {
         
         // Map status field to isStatus (active/nonactive)
         if (hasPermission('status')) {
-          const statusValue = row.status ? String(row.status).trim().toLowerCase() : 'active';
+          const statusValue = row.status ? String(row.status).trim().toLowerCase() : '';
           // Map status to isStatus field
           if (statusValue === 'active' || statusValue === 'nonactive' || statusValue === 'non active') {
             product.isStatus = statusValue === 'non active' ? 'nonactive' : statusValue;
-          } else {
-            // Default to active if invalid value
-            product.isStatus = 'active';
           }
         } else {
           // Default to active if no permission
@@ -894,7 +889,7 @@ const ProductVariantForm: React.FC = () => {
             // If no permission, preserve existing moq value
             updatePayload.moq = editProduct?.moq || 1;
           }
-          addFieldIfPermitted('purchaseType', productData.purchaseType || 'partial');
+          addFieldIfPermitted('purchaseType', productData.purchaseType);
           if (hasPermission('negotiableFixed')) {
             updatePayload.isNegotiable = productData.isNegotiable !== undefined ? productData.isNegotiable : false;
           }
@@ -1085,7 +1080,7 @@ const ProductVariantForm: React.FC = () => {
                 // If no permission, preserve existing moq value
                 updatePayload.moq = editProd?.moq || 1;
               }
-              addFieldIfPermitted('purchaseType', productData.purchaseType || 'partial');
+              addFieldIfPermitted('purchaseType', productData.purchaseType);
               if (hasPermission('negotiableFixed')) {
                 updatePayload.isNegotiable = productData.isNegotiable !== undefined ? productData.isNegotiable : false;
               }

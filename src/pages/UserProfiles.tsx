@@ -116,7 +116,7 @@ export default function UserProfiles() {
         description="This is React.js Profile Dashboard page for TailAdmin - React.js Tailwind CSS Admin Dashboard Template"
       />
       <PageBreadcrumb pageTitle="Profile" />
-      <div className="dark:border-gray-800 dark:bg-white/[0.03] lg:p-0">
+      <div className="lg:p-0">
         <div className="space-y-6">
           {/* <UserMetaCard name={formData.name} /> */}
           <UserInfoCard formData={formData} handleChange={handleChange} />

@@ -57,6 +57,16 @@ export default function UserInfoCard({
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [certificateFile, setCertificateFile] = useState<File | null>(null);
 
+  // Store initial business profile values to track changes
+  const [initialBusinessProfile, setInitialBusinessProfile] = useState<{
+    businessName: string;
+    businessCountry: string;
+    businessCurrency: string;
+    businessAddress: string;
+    hasLogo: boolean;
+    hasCertificate: boolean;
+  } | null>(null);
+
   // Helper function to construct full image URL from relative path
   const getImageUrl = (path: string | null | undefined): string | null => {
     if (!path) return null;
@@ -98,12 +108,23 @@ export default function UserInfoCard({
           const certUrl = getImageUrl(bp.certificate);
           if (certUrl) setCertificateImage(certUrl);
         }
+
+        // Store initial business profile values for change detection
+        setInitialBusinessProfile({
+          businessName: bp?.businessName ?? p?.businessName ?? formData.businessName ?? "",
+          businessCountry: bp?.country ?? p?.country ?? formData.businessCountry ?? "",
+          businessCurrency: bp?.currencyCode ?? bp?.currency ?? p?.currency ?? formData.businessCurrency ?? "",
+          businessAddress: bp?.address ?? p?.address ?? formData.businessAddress ?? "",
+          hasLogo: !!(bp?.logo || p?.logo),
+          hasCertificate: !!(bp?.certificate || p?.certificate),
+        });
       } catch (error) {
         console.error('Error loading images from profile:', error);
       }
     };
 
     loadImagesFromProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Country code dropdown state
@@ -302,9 +323,27 @@ export default function UserInfoCard({
           const certUrl = getImageUrl(bp.certificate);
           if (certUrl) setCertificateImage(certUrl);
         }
-      } catch {}
+
+        // Reset file states after successful save
+        setLogoFile(null);
+        setCertificateFile(null);
+
+        // Update initial business profile values after save
+        setInitialBusinessProfile({
+          businessName: bp?.businessName ?? p?.businessName ?? formData.businessName ?? "",
+          businessCountry: bp?.country ?? p?.country ?? formData.businessCountry ?? "",
+          businessCurrency: bp?.currencyCode ?? bp?.currency ?? p?.currency ?? formData.businessCurrency ?? "",
+          businessAddress: bp?.address ?? p?.address ?? formData.businessAddress ?? "",
+          hasLogo: !!(bp?.logo || p?.logo),
+          hasCertificate: !!(bp?.certificate || p?.certificate),
+        });
+      } catch (err) {
+        // Silently handle error - already handled in service
+        console.error('Error updating local storage after save:', err);
+      }
     } catch (error) {
       // Error toasts handled in service
+      console.error('Error saving business profile:', error);
     } finally {
       setIsSaving(false);
     }
@@ -352,6 +391,7 @@ export default function UserInfoCard({
       } as React.ChangeEvent<HTMLInputElement>);
     } catch (error) {
       // Error toast already handled in service
+      console.error('Error changing password:', error);
     } finally {
       setIsChangingPassword(false);
     }
@@ -392,10 +432,41 @@ export default function UserInfoCard({
     }
   };
 
+  // Check if business profile has been modified
+  const hasBusinessProfileChanged = (): boolean => {
+    if (!initialBusinessProfile) return false;
+
+    // Check if any text fields have changed (normalize by trimming)
+    const currentName = (formData.businessName?.trim() || "");
+    const initialName = (initialBusinessProfile.businessName?.trim() || "");
+    const currentCountry = (formData.businessCountry?.trim() || "");
+    const initialCountry = (initialBusinessProfile.businessCountry?.trim() || "");
+    const currentCurrency = (formData.businessCurrency?.trim() || "");
+    const initialCurrency = (initialBusinessProfile.businessCurrency?.trim() || "");
+    const currentAddress = (formData.businessAddress?.trim() || "");
+    const initialAddress = (initialBusinessProfile.businessAddress?.trim() || "");
+
+    const textFieldsChanged = 
+      currentName !== initialName ||
+      currentCountry !== initialCountry ||
+      currentCurrency !== initialCurrency ||
+      currentAddress !== initialAddress;
+
+    // Check if files have been added (new file selected)
+    const logoFileAdded = logoFile !== null;
+    const certificateFileAdded = certificateFile !== null;
+    
+    // Check if existing images were removed (had image before but now removed)
+    const logoRemoved = initialBusinessProfile.hasLogo && !logoImage && !logoFile;
+    const certificateRemoved = initialBusinessProfile.hasCertificate && !certificateImage && !certificateFile;
+
+    return textFieldsChanged || logoFileAdded || certificateFileAdded || logoRemoved || certificateRemoved;
+  };
+
   return (
-    <div className="p-5 border bg-white border-gray-200 rounded-2xl shadow dark:border-gray-800 lg:p-6">
+    <div className="p-5 border bg-white border-gray-200 rounded-2xl shadow dark:bg-gray-800 dark:border-gray-700 lg:p-6">
       {/* Three Tabs */}
-      <div className="flex gap-6 border-b pb-3 mb-5">
+      <div className="flex gap-6 border-b border-gray-200 dark:border-gray-700 pb-3 mb-5">
         <button
           onClick={() => setActiveTab("profile")}
           className={`pb-2 text-base font-medium ${
@@ -434,7 +505,7 @@ export default function UserInfoCard({
           <div className="grid grid-cols-1 gap-6">
             <div>
               <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-                <i className="fas fa-user text-gray-500"></i> Name
+                <i className="fas fa-user text-gray-500 dark:text-gray-400"></i> Name
                 <span className="text-red-500">*</span>
               </p>
               <input
@@ -442,14 +513,14 @@ export default function UserInfoCard({
                 name="name"
                 value={formData.name}
                 onChange={handleChange}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg  dark:bg-gray-800 dark:text-white/90 dark:border-gray-600"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg dark:bg-gray-700 dark:text-white dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400"
                 placeholder="Enter your full name"
               />
             </div>
 
             <div>
               <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-                <i className="fas fa-envelope text-gray-500"></i> Email Address
+                <i className="fas fa-envelope text-gray-500 dark:text-gray-400"></i> Email Address
                 <span className="text-red-500">*</span>
               </p>
               <input
@@ -457,14 +528,14 @@ export default function UserInfoCard({
                 name="email"
                 value={formData.email}
                 onChange={handleChange}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg  dark:bg-gray-800 dark:text-white/90 dark:border-gray-600"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg dark:bg-gray-700 dark:text-white dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400"
                 placeholder="Enter your email"
               />
             </div>
 
             <div>
               <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-                <i className="fas fa-phone text-gray-500"></i> Mobile Number
+                <i className="fas fa-phone text-gray-500 dark:text-gray-400"></i> Mobile Number
                 <span className="text-red-500">*</span>
               </p>
               <div className="relative flex gap-2">
@@ -476,7 +547,7 @@ export default function UserInfoCard({
                       setShowPhoneDropdown(!showPhoneDropdown);
                       if (showPhoneDropdown) setPhoneSearchTerm("");
                     }}
-                    className="flex items-center justify-between cursor-pointer w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black text-gray-700 text-sm hover:bg-gray-100 transition-colors h-10 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300"
+                    className="flex items-center justify-between cursor-pointer w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-gray-700 text-sm hover:bg-gray-100 transition-colors h-10 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-600"
                   >
                     <div className="flex items-center">
                       {countries.find(
@@ -495,7 +566,7 @@ export default function UserInfoCard({
                       <span>{formData.countryCode}</span>
                     </div>
                     <svg
-                      className="ml-1 w-3 h-3 text-gray-400"
+                      className="ml-1 w-3 h-3 text-gray-400 dark:text-gray-400"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -509,7 +580,7 @@ export default function UserInfoCard({
                     </svg>
                   </button>
                   {showPhoneDropdown && (
-                    <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-300 rounded-lg shadow-lg z-10 dark:bg-gray-700 dark:border-gray-600">
+                    <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-300 rounded-lg shadow-lg z-10 dark:bg-gray-700 dark:border-gray-600 dark:shadow-xl">
                       <div className="p-2 border-b border-gray-200 dark:border-gray-600">
                         <div className="relative">
                           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -546,7 +617,7 @@ export default function UserInfoCard({
                               onClick={() =>
                                 handlePhoneCodeChange(country.phone_code)
                               }
-                              className="flex items-center px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm dark:hover:bg-gray-600"
+                              className="flex items-center px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm dark:hover:bg-gray-600 dark:text-gray-200"
                             >
                               <img
                                 src={country.flag}
@@ -583,7 +654,7 @@ export default function UserInfoCard({
                         target: { name: "phone", value: numericValue },
                       } as React.ChangeEvent<HTMLInputElement>);
                     }}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg  dark:bg-gray-800 dark:text-white/90"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg dark:bg-gray-700 dark:text-white dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400"
                     placeholder="Enter your phone number"
                   />
                 </div>
@@ -640,7 +711,7 @@ export default function UserInfoCard({
           <div className="grid grid-cols-1 gap-6">
             <div>
               <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-                <i className="fas fa-briefcase text-gray-500"></i> Business Name
+                <i className="fas fa-briefcase text-gray-500 dark:text-gray-400"></i> Business Name
                 <span className="text-red-500">*</span>
               </p>
               <input
@@ -648,7 +719,7 @@ export default function UserInfoCard({
                 name="businessName"
                 value={formData.businessName}
                 onChange={handleChange}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg  dark:bg-gray-800 dark:text-white/90 dark:border-gray-600"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg dark:bg-gray-700 dark:text-white dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400"
                 placeholder="Enter your business name"
               />
             </div>
@@ -656,7 +727,7 @@ export default function UserInfoCard({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-                  <i className="fas fa-globe text-gray-500"></i> Country
+                  <i className="fas fa-globe text-gray-500 dark:text-gray-400"></i> Country
                   <span className="text-red-500">*</span>
                 </p>
                 <div className="relative" ref={businessCountryRef}>
@@ -666,13 +737,13 @@ export default function UserInfoCard({
                       setShowBusinessCountryDropdown(!showBusinessCountryDropdown);
                       if (showBusinessCountryDropdown) setBusinessCountrySearchTerm("");
                     }}
-                    className="flex items-center justify-between cursor-pointer w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black text-gray-700 text-sm hover:bg-gray-100 transition-colors h-10 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300"
+                    className="flex items-center justify-between cursor-pointer w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-gray-700 text-sm hover:bg-gray-100 transition-colors h-10 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-600"
                   >
                     <span>
                       {formData.businessCountry || "Select Country"}
                     </span>
                     <svg
-                      className="ml-1 w-3 h-3 text-gray-400"
+                      className="ml-1 w-3 h-3 text-gray-400 dark:text-gray-400"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -686,7 +757,7 @@ export default function UserInfoCard({
                     </svg>
                   </button>
                   {showBusinessCountryDropdown && (
-                    <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-10 dark:bg-gray-700 dark:border-gray-600">
+                    <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-10 dark:bg-gray-700 dark:border-gray-600 dark:shadow-xl">
                       <div className="p-2 border-b border-gray-200 dark:border-gray-600">
                         <div className="relative">
                           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -721,7 +792,7 @@ export default function UserInfoCard({
                             <div
                               key={country}
                               onClick={() => handleBusinessCountryChange(country)}
-                              className="flex items-center px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm dark:hover:bg-gray-600"
+                              className="flex items-center px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm dark:hover:bg-gray-600 dark:text-gray-200"
                             >
                               <span className="text-gray-900 dark:text-gray-100">
                                 {country}
@@ -741,20 +812,20 @@ export default function UserInfoCard({
               </div>
               <div>
                 <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-                  <i className="fas fa-dollar-sign text-gray-500"></i> Currency
+                  <i className="fas fa-dollar-sign text-gray-500 dark:text-gray-400"></i> Currency
                   <span className="text-red-500">*</span>
                 </p>
                 <div className="relative" ref={currencyRef}>
                   <button
                     type="button"
                     onClick={() => setShowCurrencyDropdown(!showCurrencyDropdown)}
-                    className="flex items-center justify-between cursor-pointer w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black text-gray-700 text-sm hover:bg-gray-100 transition-colors h-10 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300"
+                    className="flex items-center justify-between cursor-pointer w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-gray-700 text-sm hover:bg-gray-100 transition-colors h-10 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-600"
                   >
                     <span>
                       {formData.businessCurrency || "Select Currency"}
                     </span>
                     <svg
-                      className="ml-1 w-3 h-3 text-gray-400"
+                      className="ml-1 w-3 h-3 text-gray-400 dark:text-gray-400"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -768,7 +839,7 @@ export default function UserInfoCard({
                     </svg>
                   </button>
                   {showCurrencyDropdown && (
-                    <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-10 dark:bg-gray-700 dark:border-gray-600">
+                    <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-10 dark:bg-gray-700 dark:border-gray-600 dark:shadow-xl">
                       <div className="max-h-48 overflow-y-auto">
                         {currencies.map((currency) => (
                           <div
@@ -790,16 +861,16 @@ export default function UserInfoCard({
 
             <div>
               <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-                <i className="fas fa-map-marker-alt text-gray-500"></i> Business
+                <i className="fas fa-map-marker-alt text-gray-500 dark:text-gray-400"></i> Business
                 Address
-                <span className="text-xs text-gray-400">(Optional)</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">(Optional)</span>
               </p>
               <textarea
                 name="businessAddress"
                 value={formData.businessAddress}
                 onChange={handleChange}
                 rows={3}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg  dark:bg-gray-800 dark:text-white/90 resize-none dark:border-gray-600"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg dark:bg-gray-700 dark:text-white resize-none dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400"
                 placeholder="Enter your business address"
               />
             </div>
@@ -807,11 +878,11 @@ export default function UserInfoCard({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-                  <i className="fas fa-image text-gray-500"></i> Business Logo
+                  <i className="fas fa-image text-gray-500 dark:text-gray-400"></i> Business Logo
                   <span className="text-xs text-gray-400">(Optional)</span>
                 </p>
                 <div className="space-y-3">
-                  <label className="inline-block px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md cursor-pointer hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600">
+                  <label className="inline-block px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md cursor-pointer hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600 transition-colors">
                     Choose Logo
                     <input
                       type="file"
@@ -830,7 +901,7 @@ export default function UserInfoCard({
                       <img
                         src={logoImage}
                         alt="Logo preview"
-                        className="w-20 h-20 object-cover rounded-lg border"
+                        className="w-20 h-20 object-cover rounded-lg border border-gray-300 dark:border-gray-600"
                       />
                       <button
                         type="button"
@@ -846,12 +917,12 @@ export default function UserInfoCard({
 
               <div>
                 <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-                  <i className="fas fa-certificate text-gray-500"></i> Business
+                  <i className="fas fa-certificate text-gray-500 dark:text-gray-400"></i> Business
                   Certificate
                   <span className="text-xs text-gray-400">(Optional)</span>
                 </p>
                 <div className="space-y-3">
-                  <label className="inline-block px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md cursor-pointer hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600">
+                  <label className="inline-block px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md cursor-pointer hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600 transition-colors">
                     Choose Certificate
                     <input
                       type="file"
@@ -870,7 +941,7 @@ export default function UserInfoCard({
                       <img
                         src={certificateImage}
                         alt="Certificate preview"
-                        className="w-32 h-24 object-cover rounded-lg border"
+                        className="w-32 h-24 object-cover rounded-lg border border-gray-300 dark:border-gray-600"
                       />
                       <button
                         type="button"
@@ -889,8 +960,8 @@ export default function UserInfoCard({
           <div className="flex justify-end mt-6">
             <button
               onClick={handleSave}
-              className="flex items-center justify-center gap-2 rounded-lg px-6 py-3 text-base font-medium text-white shadow bg-[#0071E3] hover:bg-[#005bb5] disabled:opacity-60 transition-colors"
-              disabled={isSaving}
+              className="flex items-center justify-center gap-2 rounded-lg px-6 py-3 text-base font-medium text-white shadow bg-[#0071E3] hover:bg-[#005bb5] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              disabled={isSaving || !hasBusinessProfileChanged()}
             >
               {isSaving ? (
                 <span className="flex items-center justify-center gap-2 min-w-[220px]">
@@ -934,7 +1005,7 @@ export default function UserInfoCard({
         <div className="grid grid-cols-1 gap-6">
           <div>
             <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-              <i className="fas fa-lock text-gray-500"></i> Current Password
+              <i className="fas fa-lock text-gray-500 dark:text-gray-400"></i> Current Password
             </p>
             <div className="relative">
               <input
@@ -942,12 +1013,12 @@ export default function UserInfoCard({
                 name="currentPassword"
                 value={formData.currentPassword}
                 onChange={handleChange}
-                className="w-full px-3 py-2 pr-10 text-sm border rounded-lg focus:ring focus:ring-brand-300 dark:bg-gray-800 dark:text-white/90"
+                className="w-full px-3 py-2 pr-10 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white dark:border-gray-600 dark:focus:ring-blue-400 dark:focus:border-blue-400"
               />
               <button
                 type="button"
                 onClick={() => togglePassword("current")}
-                className="absolute inset-y-0 right-3 flex items-center text-gray-500"
+                className="absolute inset-y-0 right-3 flex items-center text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
               >
                 <i
                   className={`fas ${
@@ -959,7 +1030,7 @@ export default function UserInfoCard({
           </div>
           <div>
             <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-              <i className="fas fa-lock text-gray-500"></i> New Password
+              <i className="fas fa-lock text-gray-500 dark:text-gray-400"></i> New Password
             </p>
             <div className="relative">
               <input
@@ -967,12 +1038,12 @@ export default function UserInfoCard({
                 name="newPassword"
                 value={formData.newPassword}
                 onChange={handleChange}
-                className="w-full px-3 py-2 pr-10 text-sm border rounded-lg focus:ring focus:ring-brand-300 dark:bg-gray-800 dark:text-white/90"
+                className="w-full px-3 py-2 pr-10 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white dark:border-gray-600 dark:focus:ring-blue-400 dark:focus:border-blue-400"
               />
               <button
                 type="button"
                 onClick={() => togglePassword("new")}
-                className="absolute inset-y-0 right-3 flex items-center text-gray-500"
+                className="absolute inset-y-0 right-3 flex items-center text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
               >
                 <i
                   className={`fas ${
@@ -984,7 +1055,7 @@ export default function UserInfoCard({
           </div>
           <div>
             <p className="mb-2 flex items-center gap-2 text-base font-medium text-gray-600 dark:text-gray-400">
-              <i className="fas fa-lock text-gray-500"></i> Confirm Password
+              <i className="fas fa-lock text-gray-500 dark:text-gray-400"></i> Confirm Password
             </p>
             <div className="relative">
               <input
@@ -992,12 +1063,12 @@ export default function UserInfoCard({
                 name="confirmPassword"
                 value={formData.confirmPassword}
                 onChange={handleChange}
-                className="w-full px-3 py-2 pr-10 text-sm border rounded-lg focus:ring focus:ring-brand-300 dark:bg-gray-800 dark:text-white/90"
+                className="w-full px-3 py-2 pr-10 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white dark:border-gray-600 dark:focus:ring-blue-400 dark:focus:border-blue-400"
               />
               <button
                 type="button"
                 onClick={() => togglePassword("confirm")}
-                className="absolute inset-y-0 right-3 flex items-center text-gray-500"
+                className="absolute inset-y-0 right-3 flex items-center text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
               >
                 <i
                   className={`fas ${
