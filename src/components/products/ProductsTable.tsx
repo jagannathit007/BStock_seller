@@ -170,11 +170,55 @@ const ProductsTable: React.FC = () => {
     }
   };
 
-  const handleEdit = (product: Product) => {
-    if (product._id) {
-      // Navigate to ProductVariantForm with product ID for editing
-      navigate(`/products/create?editId=${product._id}`);
+  // Helper function to check business profile approval status (REAL CHECK from server)
+  const checkBusinessProfileApproval = async (): Promise<boolean> => {
+    try {
+      // Always fetch fresh profile from server for real check
+      const profile = await AuthService.getProfile();
+      const businessProfileStatus = profile?.data?.businessProfile?.status;
+      
+      if (businessProfileStatus !== 'approved') {
+        // Show Business Profile Approval Required box
+        await Swal.fire({
+          icon: "info",
+          title: "Business Profile Approval Required",
+          html: `<p style="text-align: left; margin: 10px 0;">Your business profile must be approved by admin before you can perform this action. Please wait for admin approval or contact support if you have already submitted your business profile.</p>`,
+          confirmButtonText: "OK",
+          confirmButtonColor: "#0071E0",
+          width: "500px",
+        });
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Error checking business profile:', error);
+      // On error, show approval box as safety measure
+      await Swal.fire({
+        icon: "error",
+        title: "Error Checking Business Profile",
+        html: `<p style="text-align: left; margin: 10px 0;">Unable to verify your business profile status. Please try again or contact support.</p>`,
+        confirmButtonText: "OK",
+        confirmButtonColor: "#0071E0",
+        width: "500px",
+      });
+      return false;
     }
+  };
+
+  const handleEdit = async (product: Product) => {
+    if (!product._id) return;
+    
+    // FIRST check business profile approval status (REAL CHECK)
+    const isApproved = await checkBusinessProfileApproval();
+    
+    // Only proceed if business profile is approved
+    if (!isApproved) {
+      return; // Stop here, don't navigate
+    }
+    
+    // If approved, navigate to ProductVariantForm with product ID for editing
+    navigate(`/products/create?editId=${product._id}`);
   };
 
   const handleVerify = async (product: Product) => {
@@ -372,38 +416,16 @@ const ProductsTable: React.FC = () => {
             <button
               className="inline-flex items-center gap-2 rounded-lg bg-[#0071E0] text-white px-4 py-2 text-sm font-medium hover:bg-blue-600 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
               onClick={async () => {
-                // Check business profile approval status
-                try {
-                  // First check localStorage
-                  const stored = StorageService.getItem<any>(STORAGE_KEYS.USER);
-                  let businessProfileStatus = stored?.businessProfile?.status;
-                  
-                  // If not in localStorage or status is not approved, fetch fresh profile
-                  if (!businessProfileStatus || businessProfileStatus !== 'approved') {
-                    const profile = await AuthService.getProfile();
-                    businessProfileStatus = profile?.data?.businessProfile?.status;
-                  }
-                  
-                  if (businessProfileStatus !== 'approved') {
-                    // Show confirmation/info box instead of error
-                    await Swal.fire({
-                      icon: "info",
-                      title: "Business Profile Approval Required",
-                      html: `<p style="text-align: left; margin: 10px 0;">Your business profile must be approved by admin before you can create products. Please wait for admin approval or contact support if you have already submitted your business profile.</p>`,
-                      confirmButtonText: "OK",
-                      confirmButtonColor: "#0071E0",
-                      width: "500px",
-                    });
-                    return;
-                  }
-                  
-                  // If approved, show the variant selection modal
-                  setShowVariantSelectionModal(true);
-                } catch (error) {
-                  console.error('Error checking business profile:', error);
-                  // On error, still show the modal (let backend handle the validation)
-                  setShowVariantSelectionModal(true);
+                // FIRST check business profile approval status (REAL CHECK from server)
+                const isApproved = await checkBusinessProfileApproval();
+                
+                // Only proceed if business profile is approved
+                if (!isApproved) {
+                  return; // Stop here, don't show modal
                 }
+                
+                // If approved, show the variant selection modal
+                setShowVariantSelectionModal(true);
               }}
             >
               <i className="fas fa-plus text-xs"></i>

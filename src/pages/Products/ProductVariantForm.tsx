@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import Swal from 'sweetalert2';
 import CascadingVariantSelector, { VariantOption } from '../../components/products/CascadingVariantSelector';
 import ExcelLikeProductForm, { ProductRowData } from '../../components/products/ExcelLikeProductForm';
 import { ProductService } from '../../services/products/products.services';
 import { SellerProductPermissionService, SellerProductFieldPermission } from '../../services/sellerProductPermission/sellerProductPermission.services';
 import { STORAGE_KEYS, StorageService } from '../../constants/storage';
+import { AuthService } from '../../services/auth/auth.services';
 import toastHelper from '../../utils/toastHelper';
 
 type PageStep = 'variant-selection' | 'variant-config' | 'form';
@@ -77,6 +79,60 @@ const ProductVariantForm: React.FC = () => {
     };
     loadPermissions();
   }, []);
+
+  // Helper function to check business profile approval status (REAL CHECK from server)
+  const checkBusinessProfileApproval = async (): Promise<boolean> => {
+    try {
+      // Always fetch fresh profile from server for real check
+      const profile = await AuthService.getProfile();
+      const businessProfileStatus = profile?.data?.businessProfile?.status;
+      
+      if (businessProfileStatus !== 'approved') {
+        // Show Business Profile Approval Required box
+        await Swal.fire({
+          icon: "info",
+          title: "Business Profile Approval Required",
+          html: `<p style="text-align: left; margin: 10px 0;">Your business profile must be approved by admin before you can perform this action. Please wait for admin approval or contact support if you have already submitted your business profile.</p>`,
+          confirmButtonText: "OK",
+          confirmButtonColor: "#0071E0",
+          width: "500px",
+        });
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Error checking business profile:', error);
+      // On error, show approval box as safety measure
+      await Swal.fire({
+        icon: "error",
+        title: "Error Checking Business Profile",
+        html: `<p style="text-align: left; margin: 10px 0;">Unable to verify your business profile status. Please try again or contact support.</p>`,
+        confirmButtonText: "OK",
+        confirmButtonColor: "#0071E0",
+        width: "500px",
+      });
+      return false;
+    }
+  };
+
+  // Check business profile approval when editing (REAL CHECK on page load)
+  useEffect(() => {
+    const verifyBusinessProfileApproval = async () => {
+      if (!editId) return;
+      
+      // FIRST check business profile approval status (REAL CHECK)
+      const isApproved = await checkBusinessProfileApproval();
+      
+      // If not approved, navigate back to products page
+      if (!isApproved) {
+        navigate('/products');
+        return;
+      }
+    };
+    
+    verifyBusinessProfileApproval();
+  }, [editId, navigate]);
   
   // Load product data when editing
   useEffect(() => {
